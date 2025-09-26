@@ -51,9 +51,13 @@ localPort = 8000
 externalPort = 8000
 
 [[ports]]
+localPort = 40661
+externalPort = 3001
+
+[[ports]]
 localPort = 42231
 externalPort = 3000
 
 [nix]
 channel = "stable-25_05"
-packages = ["libreoffice"]
+packages = ["libreoffice", "poppler_utils"]

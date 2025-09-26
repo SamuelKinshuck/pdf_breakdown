@@ -143,7 +143,7 @@ const DocumentProcessorForm: React.FC = () => {
     formDataToSend.append('file', file);
 
     try {
-      const response = await axios.post<FileUploadResponse>('http://localhost:8000/upload', formDataToSend, {
+      const response = await axios.post<FileUploadResponse>('https://70f3896b-b1a2-4427-8525-b41b01422f18-00-1xhbn4699zifp.picard.replit.dev:8000/upload', formDataToSend, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
