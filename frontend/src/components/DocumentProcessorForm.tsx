@@ -143,11 +143,7 @@ const DocumentProcessorForm: React.FC = () => {
     formDataToSend.append('file', file);
 
     try {
-      const response = await axios.post<FileUploadResponse>('https://70f3896b-b1a2-4427-8525-b41b01422f18-00-1xhbn4699zifp.picard.replit.dev:8000/upload', formDataToSend, {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      });
+      const response = await axios.post<FileUploadResponse>('/upload', formDataToSend);
 
       setFileInfo(response.data);
       setFormData(prev => ({ ...prev, file }));
@@ -204,7 +200,7 @@ const DocumentProcessorForm: React.FC = () => {
     e.preventDefault();
     
     try {
-      const response = await axios.post('http://localhost:8000/process', {
+      const response = await axios.post('/process', {
         role: formData.role,
         task: formData.task,
         context: formData.context,
