@@ -76,6 +76,65 @@ const DocumentProcessorForm: React.FC = () => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  // Helper functions for collapsible sections
+  const togglePromptSection = (section: keyof typeof promptSectionsExpanded) => {
+    setPromptSectionsExpanded(prev => ({
+      ...prev,
+      [section]: !prev[section]
+    }));
+  };
+
+  // CollapsibleSection component
+  const CollapsibleSection: React.FC<{
+    title: string;
+    isExpanded: boolean;
+    onToggle: () => void;
+    children: React.ReactNode;
+    isSubSection?: boolean;
+  }> = ({ title, isExpanded, onToggle, children, isSubSection = false }) => {
+    const headerStyle = isSubSection ? {
+      ...labelStyle,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      cursor: 'pointer',
+      padding: '8px 0',
+      borderBottom: `1px solid ${colors.primary.lightBlue}`,
+      marginBottom: isExpanded ? '8px' : '0'
+    } : {
+      ...sectionHeaderStyle,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      cursor: 'pointer',
+      paddingBottom: '12px'
+    };
+
+    const chevronStyle = {
+      transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+      transition: 'transform 0.3s ease',
+      fontSize: '16px',
+      color: isSubSection ? colors.secondary.darkPurple : colors.tertiary.orange
+    };
+
+    return (
+      <div style={{ marginBottom: isSubSection ? '20px' : '32px' }}>
+        <div style={headerStyle} onClick={onToggle}>
+          <span>{title}</span>
+          <span style={chevronStyle}>▶</span>
+        </div>
+        {isExpanded && (
+          <div style={{ 
+            overflow: 'hidden',
+            transition: 'all 0.3s ease'
+          }}>
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const handleFileUpload = useCallback(async (file: File) => {
     setIsUploading(true);
     setUploadError('');
