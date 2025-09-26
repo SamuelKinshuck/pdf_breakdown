@@ -36,6 +36,17 @@ const DocumentProcessorForm: React.FC = () => {
   const [fileInfo, setFileInfo] = useState<FileUploadResponse | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string>('');
+  
+  // Collapsible sections state
+  const [promptConfigExpanded, setPromptConfigExpanded] = useState(true);
+  const [modelConfigExpanded, setModelConfigExpanded] = useState(true);
+  const [promptSectionsExpanded, setPromptSectionsExpanded] = useState({
+    role: true,
+    task: true,
+    context: true,
+    format: true,
+    constraints: true
+  });
 
   // Color scheme
   const colors = {
