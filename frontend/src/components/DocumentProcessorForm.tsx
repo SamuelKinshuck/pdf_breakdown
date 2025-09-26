@@ -163,18 +163,37 @@ const DocumentProcessorForm: React.FC = () => {
     fontFamily: 'system-ui, -apple-system, sans-serif',
     backgroundColor: colors.primary.white,
     color: colors.primary.darkGrey,
-    transition: 'border-color 0.3s ease',
+    transition: 'all 0.3s ease',
     outline: 'none'
+  };
+
+
+  const sectionHeaderStyle = {
+    color: colors.secondary.darkPurple,
+    fontSize: '18px',
+    fontWeight: '700',
+    marginBottom: '16px',
+    textTransform: 'uppercase' as const,
+    letterSpacing: '1px',
+    borderBottom: `2px solid ${colors.tertiary.yellow}`,
+    paddingBottom: '8px'
   };
 
   const labelStyle = {
     display: 'block',
     marginBottom: '8px',
     fontWeight: '600',
-    color: colors.primary.darkGrey,
+    color: colors.secondary.darkPurple,
     fontSize: '14px',
     textTransform: 'uppercase' as const,
     letterSpacing: '0.5px'
+  };
+
+  const helperTextStyle = {
+    fontSize: '12px',
+    color: colors.tertiary.blueGrey,
+    marginTop: '4px',
+    fontStyle: 'italic'
   };
 
   return (
@@ -182,6 +201,7 @@ const DocumentProcessorForm: React.FC = () => {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '32px' }}>
         {/* Left Column */}
         <div>
+          <h2 style={sectionHeaderStyle}>Prompt Configuration</h2>
           {/* Role */}
           <div style={{ marginBottom: '24px' }}>
             <label style={labelStyle}>Role</label>
@@ -195,7 +215,16 @@ const DocumentProcessorForm: React.FC = () => {
                 minHeight: '100px'
               }}
               placeholder="Define the role or persona for the AI assistant..."
+              onFocus={(e) => {
+                e.target.style.borderColor = colors.tertiary.blue;
+                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = colors.primary.lightBlue;
+                e.target.style.boxShadow = 'none';
+              }}
             />
+            <div style={helperTextStyle}>Specify the persona, expertise level, and perspective for the AI</div>
           </div>
 
           {/* Task */}
@@ -211,7 +240,16 @@ const DocumentProcessorForm: React.FC = () => {
                 minHeight: '100px'
               }}
               placeholder="Describe the specific task to be performed..."
+              onFocus={(e) => {
+                e.target.style.borderColor = colors.tertiary.blue;
+                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = colors.primary.lightBlue;
+                e.target.style.boxShadow = 'none';
+              }}
             />
+            <div style={helperTextStyle}>Clear, specific description of what you want accomplished</div>
           </div>
 
           {/* Context */}
@@ -227,12 +265,22 @@ const DocumentProcessorForm: React.FC = () => {
                 minHeight: '100px'
               }}
               placeholder="Provide relevant context and background information..."
+              onFocus={(e) => {
+                e.target.style.borderColor = colors.tertiary.blue;
+                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = colors.primary.lightBlue;
+                e.target.style.boxShadow = 'none';
+              }}
             />
+            <div style={helperTextStyle}>Background information, constraints, or relevant details</div>
           </div>
         </div>
 
         {/* Right Column */}
         <div>
+          <h2 style={sectionHeaderStyle}>Output Settings</h2>
           {/* Format */}
           <div style={{ marginBottom: '24px' }}>
             <label style={labelStyle}>Format</label>
@@ -246,7 +294,16 @@ const DocumentProcessorForm: React.FC = () => {
                 minHeight: '100px'
               }}
               placeholder="Specify the desired output format..."
+              onFocus={(e) => {
+                e.target.style.borderColor = colors.tertiary.blue;
+                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = colors.primary.lightBlue;
+                e.target.style.boxShadow = 'none';
+              }}
             />
+            <div style={helperTextStyle}>Structure, style, length, or presentation requirements</div>
           </div>
 
           {/* Constraints */}
@@ -262,12 +319,22 @@ const DocumentProcessorForm: React.FC = () => {
                 minHeight: '100px'
               }}
               placeholder="Define any constraints or limitations..."
+              onFocus={(e) => {
+                e.target.style.borderColor = colors.tertiary.blue;
+                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = colors.primary.lightBlue;
+                e.target.style.boxShadow = 'none';
+              }}
             />
+            <div style={helperTextStyle}>Rules, limitations, or things to avoid</div>
           </div>
 
           {/* Temperature */}
           <div style={{ marginBottom: '24px' }}>
             <label style={labelStyle}>Temperature: {formData.temperature}</label>
+            <div style={helperTextStyle}>Controls randomness: 0 = focused, 1 = creative</div>
             <div style={{ position: 'relative', marginTop: '8px' }}>
               <input
                 type="range"
@@ -280,7 +347,8 @@ const DocumentProcessorForm: React.FC = () => {
                   width: '100%',
                   height: '8px',
                   borderRadius: '4px',
-                  background: `linear-gradient(to right, ${colors.secondary.seaGreen} 0%, ${colors.secondary.seaGreen} ${formData.temperature * 100}%, ${colors.primary.lightBlue} ${formData.temperature * 100}%, ${colors.primary.lightBlue} 100%)`,
+                  background: `linear-gradient(to right, ${colors.tertiary.orange} 0%, ${colors.tertiary.yellow} ${formData.temperature * 100}%, ${colors.primary.lightBlue} ${formData.temperature * 100}%, ${colors.primary.lightBlue} 100%)`,
+                  boxShadow: `0 2px 4px ${colors.tertiary.blueGrey}30`,
                   outline: 'none',
                   appearance: 'none'
                 }}
@@ -300,19 +368,33 @@ const DocumentProcessorForm: React.FC = () => {
               onChange={(e) => handleInputChange('model', e.target.value)}
               style={{
                 ...inputStyle,
-                cursor: 'pointer'
+                cursor: 'pointer',
+                backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='${colors.tertiary.blueGrey.replace('#', '%23')}' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
+                backgroundPosition: 'right 12px center',
+                backgroundRepeat: 'no-repeat',
+                backgroundSize: '16px',
+                paddingRight: '40px'
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = colors.tertiary.blue;
+                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = colors.primary.lightBlue;
+                e.target.style.boxShadow = 'none';
               }}
             >
               <option value="GPT-4.1">GPT-4.1</option>
               <option value="GPT-5">GPT-5</option>
             </select>
+            <div style={helperTextStyle}>Select the AI model for processing</div>
           </div>
         </div>
       </div>
 
       {/* File Upload */}
       <div style={{ marginBottom: '32px' }}>
-        <label style={labelStyle}>File Upload</label>
+        <h2 style={sectionHeaderStyle}>Document Upload</h2>
         <div
           style={{
             border: `2px dashed ${colors.primary.lightBlue}`,
@@ -320,7 +402,19 @@ const DocumentProcessorForm: React.FC = () => {
             padding: '32px',
             textAlign: 'center',
             backgroundColor: colors.primary.white,
-            transition: 'border-color 0.3s ease'
+            transition: 'all 0.3s ease',
+            position: 'relative',
+            backgroundImage: `linear-gradient(135deg, ${colors.primary.white} 0%, ${colors.primary.offWhite} 100%)`
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.borderColor = colors.tertiary.blue;
+            e.currentTarget.style.transform = 'translateY(-2px)';
+            e.currentTarget.style.boxShadow = `0 8px 25px ${colors.tertiary.blueGrey}30`;
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.borderColor = colors.primary.lightBlue;
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = 'none';
           }}
         >
           <input
@@ -347,7 +441,18 @@ const DocumentProcessorForm: React.FC = () => {
               fontWeight: '600',
               border: 'none',
               fontSize: '16px',
-              transition: 'background-color 0.3s ease'
+              transition: 'all 0.3s ease',
+              boxShadow: `0 4px 12px ${colors.secondary.seaGreen}40`
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = colors.secondary.green;
+              e.currentTarget.style.transform = 'translateY(-1px)';
+              e.currentTarget.style.boxShadow = `0 6px 16px ${colors.secondary.green}50`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = colors.secondary.seaGreen;
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = `0 4px 12px ${colors.secondary.seaGreen}40`;
             }}
           >
             {isUploading ? 'Uploading...' : 'Choose File'}

@@ -8,6 +8,7 @@ from pptx import Presentation
 from pdf2image import convert_from_path
 import tempfile
 import shutil
+import subprocess
 
 app = Flask(__name__)
 CORS(app)
@@ -30,19 +31,72 @@ def convert_to_pdf(file_path, original_filename):
     if file_ext == 'pdf':
         return file_path
     
-    # For now, return the original file path
-    # In a production environment, you'd use libraries like python-docx2pdf or similar
-    # This is a simplified implementation
+    # Convert DOCX/PPTX to PDF using LibreOffice headless
+    if file_ext in ['docx', 'pptx']:
+        try:
+            # Create output directory
+            output_dir = os.path.dirname(file_path)
+            
+            # Use LibreOffice to convert to PDF
+            result = subprocess.run([
+                'soffice', '--headless', '--convert-to', 'pdf',
+                '--outdir', output_dir, file_path
+            ], capture_output=True, text=True, timeout=30)
+            
+            if result.returncode == 0:
+                # Generate PDF filename
+                base_name = os.path.splitext(original_filename)[0]
+                pdf_filename = f"{base_name}.pdf"
+                pdf_path = os.path.join(output_dir, pdf_filename)
+                
+                if os.path.exists(pdf_path):
+                    return pdf_path
+                else:
+                    print(f"PDF conversion succeeded but file not found: {pdf_path}")
+                    return file_path
+            else:
+                print(f"LibreOffice conversion failed: {result.stderr}")
+                return file_path
+        except subprocess.TimeoutExpired:
+            print("LibreOffice conversion timed out")
+            return file_path
+        except Exception as e:
+            print(f"Error converting file: {e}")
+            return file_path
+    
     return file_path
 
-def count_pdf_pages(pdf_path):
-    """Count the number of pages in a PDF file"""
+def count_document_pages(file_path, original_filename):
+    """Count the number of pages in a document (PDF, DOCX, or PPTX)"""
+    file_ext = original_filename.rsplit('.', 1)[1].lower()
+    
     try:
-        with open(pdf_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            return len(pdf_reader.pages)
+        if file_ext == 'pdf':
+            # Count PDF pages using PyPDF2
+            with open(file_path, 'rb') as file:
+                pdf_reader = PyPDF2.PdfReader(file)
+                return len(pdf_reader.pages)
+        
+        elif file_ext == 'docx':
+            # Count DOCX pages (approximation based on content)
+            doc = Document(file_path)
+            # This is an approximation - actual page count depends on formatting
+            # For a more accurate count, we'd need to convert to PDF first
+            paragraphs = len(doc.paragraphs)
+            # Rough estimate: 25-30 paragraphs per page
+            estimated_pages = max(1, (paragraphs + 25) // 30)
+            return estimated_pages
+        
+        elif file_ext == 'pptx':
+            # Count PPTX slides
+            prs = Presentation(file_path)
+            return len(prs.slides)
+        
+        else:
+            return 1
+            
     except Exception as e:
-        # If it's not a PDF or can't be read, return 1 as fallback
+        print(f"Error counting pages: {e}")
         return 1
 
 @app.route('/', methods=['GET'])
@@ -66,8 +120,8 @@ def upload_file():
         # Convert to PDF if necessary
         pdf_path = convert_to_pdf(file_path, filename)
         
-        # Count pages
-        page_count = count_pdf_pages(pdf_path)
+        # Count pages - use original file for more accurate counting
+        page_count = count_document_pages(file_path, filename)
         
         return jsonify({
             'success': True,
