@@ -276,204 +276,223 @@ const DocumentProcessorForm: React.FC = () => {
       borderRadius: '16px',
       boxShadow: `0 8px 32px ${colors.tertiary.blueGrey}20`
     }}>
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: window.innerWidth > 768 ? '1fr 1fr' : '1fr', 
-        gap: window.innerWidth > 768 ? '48px' : '32px', 
-        marginBottom: '40px' 
-      }}>
-        {/* Left Column */}
-        <div>
-          <h2 style={sectionHeaderStyle}>Prompt Configuration</h2>
-          {/* Role */}
-          <div style={{ marginBottom: '32px' }}>
-            <label style={labelStyle}>Role</label>
-            <textarea
-              value={formData.role}
-              onChange={(e) => handleInputChange('role', e.target.value)}
-              rows={4}
+      {/* Prompt Configuration Section */}
+      <CollapsibleSection
+        title="Prompt Configuration"
+        isExpanded={promptConfigExpanded}
+        onToggle={() => setPromptConfigExpanded(!promptConfigExpanded)}
+      >
+        {/* Role */}
+        <CollapsibleSection
+          title="Role"
+          isExpanded={promptSectionsExpanded.role}
+          onToggle={() => togglePromptSection('role')}
+          isSubSection={true}
+        >
+          <textarea
+            value={formData.role}
+            onChange={(e) => handleInputChange('role', e.target.value)}
+            rows={4}
+            style={{
+              ...inputStyle,
+              resize: 'vertical' as const,
+              minHeight: '100px'
+            }}
+            placeholder="Define the role or persona for the AI assistant..."
+            onFocus={(e) => {
+              e.target.style.borderColor = colors.tertiary.blue;
+              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = colors.primary.lightBlue;
+              e.target.style.boxShadow = 'none';
+            }}
+          />
+          <div style={helperTextStyle}>Specify the persona, expertise level, and perspective for the AI</div>
+        </CollapsibleSection>
+
+        {/* Task */}
+        <CollapsibleSection
+          title="Task"
+          isExpanded={promptSectionsExpanded.task}
+          onToggle={() => togglePromptSection('task')}
+          isSubSection={true}
+        >
+          <textarea
+            value={formData.task}
+            onChange={(e) => handleInputChange('task', e.target.value)}
+            rows={4}
+            style={{
+              ...inputStyle,
+              resize: 'vertical' as const,
+              minHeight: '100px'
+            }}
+            placeholder="Describe the specific task to be performed..."
+            onFocus={(e) => {
+              e.target.style.borderColor = colors.tertiary.blue;
+              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = colors.primary.lightBlue;
+              e.target.style.boxShadow = 'none';
+            }}
+          />
+          <div style={helperTextStyle}>Clear, specific description of what you want accomplished</div>
+        </CollapsibleSection>
+
+        {/* Context */}
+        <CollapsibleSection
+          title="Context"
+          isExpanded={promptSectionsExpanded.context}
+          onToggle={() => togglePromptSection('context')}
+          isSubSection={true}
+        >
+          <textarea
+            value={formData.context}
+            onChange={(e) => handleInputChange('context', e.target.value)}
+            rows={4}
+            style={{
+              ...inputStyle,
+              resize: 'vertical' as const,
+              minHeight: '100px'
+            }}
+            placeholder="Provide relevant context and background information..."
+            onFocus={(e) => {
+              e.target.style.borderColor = colors.tertiary.blue;
+              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = colors.primary.lightBlue;
+              e.target.style.boxShadow = 'none';
+            }}
+          />
+          <div style={helperTextStyle}>Background information, constraints, or relevant details</div>
+        </CollapsibleSection>
+
+        {/* Format */}
+        <CollapsibleSection
+          title="Format"
+          isExpanded={promptSectionsExpanded.format}
+          onToggle={() => togglePromptSection('format')}
+          isSubSection={true}
+        >
+          <textarea
+            value={formData.format}
+            onChange={(e) => handleInputChange('format', e.target.value)}
+            rows={4}
+            style={{
+              ...inputStyle,
+              resize: 'vertical' as const,
+              minHeight: '100px'
+            }}
+            placeholder="Specify the desired output format..."
+            onFocus={(e) => {
+              e.target.style.borderColor = colors.tertiary.blue;
+              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = colors.primary.lightBlue;
+              e.target.style.boxShadow = 'none';
+            }}
+          />
+          <div style={helperTextStyle}>Structure, style, length, or presentation requirements</div>
+        </CollapsibleSection>
+
+        {/* Constraints */}
+        <CollapsibleSection
+          title="Constraints"
+          isExpanded={promptSectionsExpanded.constraints}
+          onToggle={() => togglePromptSection('constraints')}
+          isSubSection={true}
+        >
+          <textarea
+            value={formData.constraints}
+            onChange={(e) => handleInputChange('constraints', e.target.value)}
+            rows={4}
+            style={{
+              ...inputStyle,
+              resize: 'vertical' as const,
+              minHeight: '100px'
+            }}
+            placeholder="Define any constraints or limitations..."
+            onFocus={(e) => {
+              e.target.style.borderColor = colors.tertiary.blue;
+              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = colors.primary.lightBlue;
+              e.target.style.boxShadow = 'none';
+            }}
+          />
+          <div style={helperTextStyle}>Rules, limitations, or things to avoid</div>
+        </CollapsibleSection>
+      </CollapsibleSection>
+
+      {/* Model Configuration Section */}
+      <CollapsibleSection
+        title="Model Configuration"
+        isExpanded={modelConfigExpanded}
+        onToggle={() => setModelConfigExpanded(!modelConfigExpanded)}
+      >
+        {/* Temperature */}
+        <div style={{ marginBottom: '32px' }}>
+          <label style={labelStyle}>Temperature: {formData.temperature}</label>
+          <div style={helperTextStyle}>Controls randomness: 0 = focused, 1 = creative</div>
+          <div style={{ position: 'relative', marginTop: '8px' }}>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              value={formData.temperature}
+              onChange={(e) => handleInputChange('temperature', parseFloat(e.target.value))}
               style={{
-                ...inputStyle,
-                resize: 'vertical' as const,
-                minHeight: '100px'
-              }}
-              placeholder="Define the role or persona for the AI assistant..."
-              onFocus={(e) => {
-                e.target.style.borderColor = colors.tertiary.blue;
-                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = colors.primary.lightBlue;
-                e.target.style.boxShadow = 'none';
+                width: '100%',
+                height: '8px',
+                borderRadius: '4px',
+                background: `linear-gradient(to right, ${colors.tertiary.orange} 0%, ${colors.tertiary.yellow} ${formData.temperature * 100}%, ${colors.primary.lightBlue} ${formData.temperature * 100}%, ${colors.primary.lightBlue} 100%)`,
+                boxShadow: `0 2px 4px ${colors.tertiary.blueGrey}30`,
+                outline: 'none',
+                appearance: 'none'
               }}
             />
-            <div style={helperTextStyle}>Specify the persona, expertise level, and perspective for the AI</div>
-          </div>
-
-          {/* Task */}
-          <div style={{ marginBottom: '32px' }}>
-            <label style={labelStyle}>Task</label>
-            <textarea
-              value={formData.task}
-              onChange={(e) => handleInputChange('task', e.target.value)}
-              rows={4}
-              style={{
-                ...inputStyle,
-                resize: 'vertical' as const,
-                minHeight: '100px'
-              }}
-              placeholder="Describe the specific task to be performed..."
-              onFocus={(e) => {
-                e.target.style.borderColor = colors.tertiary.blue;
-                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = colors.primary.lightBlue;
-                e.target.style.boxShadow = 'none';
-              }}
-            />
-            <div style={helperTextStyle}>Clear, specific description of what you want accomplished</div>
-          </div>
-
-          {/* Context */}
-          <div style={{ marginBottom: '32px' }}>
-            <label style={labelStyle}>Context</label>
-            <textarea
-              value={formData.context}
-              onChange={(e) => handleInputChange('context', e.target.value)}
-              rows={4}
-              style={{
-                ...inputStyle,
-                resize: 'vertical' as const,
-                minHeight: '100px'
-              }}
-              placeholder="Provide relevant context and background information..."
-              onFocus={(e) => {
-                e.target.style.borderColor = colors.tertiary.blue;
-                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = colors.primary.lightBlue;
-                e.target.style.boxShadow = 'none';
-              }}
-            />
-            <div style={helperTextStyle}>Background information, constraints, or relevant details</div>
-          </div>
-        </div>
-
-        {/* Right Column */}
-        <div>
-          <h2 style={sectionHeaderStyle}>Output Settings</h2>
-          {/* Format */}
-          <div style={{ marginBottom: '32px' }}>
-            <label style={labelStyle}>Format</label>
-            <textarea
-              value={formData.format}
-              onChange={(e) => handleInputChange('format', e.target.value)}
-              rows={4}
-              style={{
-                ...inputStyle,
-                resize: 'vertical' as const,
-                minHeight: '100px'
-              }}
-              placeholder="Specify the desired output format..."
-              onFocus={(e) => {
-                e.target.style.borderColor = colors.tertiary.blue;
-                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = colors.primary.lightBlue;
-                e.target.style.boxShadow = 'none';
-              }}
-            />
-            <div style={helperTextStyle}>Structure, style, length, or presentation requirements</div>
-          </div>
-
-          {/* Constraints */}
-          <div style={{ marginBottom: '32px' }}>
-            <label style={labelStyle}>Constraints</label>
-            <textarea
-              value={formData.constraints}
-              onChange={(e) => handleInputChange('constraints', e.target.value)}
-              rows={4}
-              style={{
-                ...inputStyle,
-                resize: 'vertical' as const,
-                minHeight: '100px'
-              }}
-              placeholder="Define any constraints or limitations..."
-              onFocus={(e) => {
-                e.target.style.borderColor = colors.tertiary.blue;
-                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = colors.primary.lightBlue;
-                e.target.style.boxShadow = 'none';
-              }}
-            />
-            <div style={helperTextStyle}>Rules, limitations, or things to avoid</div>
-          </div>
-
-          {/* Temperature */}
-          <div style={{ marginBottom: '32px' }}>
-            <label style={labelStyle}>Temperature: {formData.temperature}</label>
-            <div style={helperTextStyle}>Controls randomness: 0 = focused, 1 = creative</div>
-            <div style={{ position: 'relative', marginTop: '8px' }}>
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.01"
-                value={formData.temperature}
-                onChange={(e) => handleInputChange('temperature', parseFloat(e.target.value))}
-                style={{
-                  width: '100%',
-                  height: '8px',
-                  borderRadius: '4px',
-                  background: `linear-gradient(to right, ${colors.tertiary.orange} 0%, ${colors.tertiary.yellow} ${formData.temperature * 100}%, ${colors.primary.lightBlue} ${formData.temperature * 100}%, ${colors.primary.lightBlue} 100%)`,
-                  boxShadow: `0 2px 4px ${colors.tertiary.blueGrey}30`,
-                  outline: 'none',
-                  appearance: 'none'
-                }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '12px', color: colors.tertiary.lightGrey }}>
-                <span>0 (Focused)</span>
-                <span>1 (Creative)</span>
-              </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '12px', color: colors.tertiary.lightGrey }}>
+              <span>0 (Focused)</span>
+              <span>1 (Creative)</span>
             </div>
           </div>
-
-          {/* Model */}
-          <div style={{ marginBottom: '32px' }}>
-            <label style={labelStyle}>Model</label>
-            <select
-              value={formData.model}
-              onChange={(e) => handleInputChange('model', e.target.value)}
-              style={{
-                ...inputStyle,
-                cursor: 'pointer',
-                backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='${colors.tertiary.blueGrey.replace('#', '%23')}' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
-                backgroundPosition: 'right 12px center',
-                backgroundRepeat: 'no-repeat',
-                backgroundSize: '16px',
-                paddingRight: '40px'
-              }}
-              onFocus={(e) => {
-                e.target.style.borderColor = colors.tertiary.blue;
-                e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = colors.primary.lightBlue;
-                e.target.style.boxShadow = 'none';
-              }}
-            >
-              <option value="GPT-4.1">GPT-4.1</option>
-              <option value="GPT-5">GPT-5</option>
-            </select>
-            <div style={helperTextStyle}>Select the AI model for processing</div>
-          </div>
         </div>
-      </div>
+
+        {/* Model */}
+        <div style={{ marginBottom: '32px' }}>
+          <label style={labelStyle}>Model</label>
+          <select
+            value={formData.model}
+            onChange={(e) => handleInputChange('model', e.target.value)}
+            style={{
+              ...inputStyle,
+              cursor: 'pointer',
+              backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='${colors.tertiary.blueGrey.replace('#', '%23')}' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
+              backgroundPosition: 'right 12px center',
+              backgroundRepeat: 'no-repeat',
+              backgroundSize: '16px',
+              paddingRight: '40px'
+            }}
+            onFocus={(e) => {
+              e.target.style.borderColor = colors.tertiary.blue;
+              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+            }}
+            onBlur={(e) => {
+              e.target.style.borderColor = colors.primary.lightBlue;
+              e.target.style.boxShadow = 'none';
+            }}
+          >
+            <option value="GPT-4.1">GPT-4.1</option>
+            <option value="GPT-5">GPT-5</option>
+          </select>
+          <div style={helperTextStyle}>Select the AI model for processing</div>
+        </div>
+      </CollapsibleSection>
 
       {/* File Upload */}
       <div style={{ marginBottom: '32px' }}>
