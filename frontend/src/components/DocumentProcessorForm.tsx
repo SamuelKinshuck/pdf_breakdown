@@ -156,7 +156,7 @@ const DocumentProcessorForm: React.FC = () => {
 
   const inputStyle = {
     width: '100%',
-    padding: '12px 16px',
+    padding: '16px 20px',
     borderRadius: '8px',
     border: `2px solid ${colors.primary.lightBlue}`,
     fontSize: '16px',
@@ -198,7 +198,7 @@ const DocumentProcessorForm: React.FC = () => {
 
   return (
     <form onSubmit={handleSubmit} style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '32px', marginBottom: '32px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '48px', marginBottom: '40px' }}>
         {/* Left Column */}
         <div>
           <h2 style={sectionHeaderStyle}>Prompt Configuration</h2>
