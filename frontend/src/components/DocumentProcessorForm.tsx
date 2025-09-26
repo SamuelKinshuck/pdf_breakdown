@@ -197,13 +197,26 @@ const DocumentProcessorForm: React.FC = () => {
   };
 
   return (
-    <form onSubmit={handleSubmit} style={{ fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '48px', marginBottom: '40px' }}>
+    <form onSubmit={handleSubmit} style={{ 
+      fontFamily: 'system-ui, -apple-system, sans-serif',
+      padding: '32px',
+      maxWidth: '1400px',
+      margin: '0 auto',
+      backgroundColor: colors.primary.offWhite,
+      borderRadius: '16px',
+      boxShadow: `0 8px 32px ${colors.tertiary.blueGrey}20`
+    }}>
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: window.innerWidth > 768 ? '1fr 1fr' : '1fr', 
+        gap: window.innerWidth > 768 ? '48px' : '32px', 
+        marginBottom: '40px' 
+      }}>
         {/* Left Column */}
         <div>
           <h2 style={sectionHeaderStyle}>Prompt Configuration</h2>
           {/* Role */}
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '32px' }}>
             <label style={labelStyle}>Role</label>
             <textarea
               value={formData.role}
@@ -228,7 +241,7 @@ const DocumentProcessorForm: React.FC = () => {
           </div>
 
           {/* Task */}
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '32px' }}>
             <label style={labelStyle}>Task</label>
             <textarea
               value={formData.task}
@@ -253,7 +266,7 @@ const DocumentProcessorForm: React.FC = () => {
           </div>
 
           {/* Context */}
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '32px' }}>
             <label style={labelStyle}>Context</label>
             <textarea
               value={formData.context}
@@ -282,7 +295,7 @@ const DocumentProcessorForm: React.FC = () => {
         <div>
           <h2 style={sectionHeaderStyle}>Output Settings</h2>
           {/* Format */}
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '32px' }}>
             <label style={labelStyle}>Format</label>
             <textarea
               value={formData.format}
@@ -307,7 +320,7 @@ const DocumentProcessorForm: React.FC = () => {
           </div>
 
           {/* Constraints */}
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '32px' }}>
             <label style={labelStyle}>Constraints</label>
             <textarea
               value={formData.constraints}
@@ -332,7 +345,7 @@ const DocumentProcessorForm: React.FC = () => {
           </div>
 
           {/* Temperature */}
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '32px' }}>
             <label style={labelStyle}>Temperature: {formData.temperature}</label>
             <div style={helperTextStyle}>Controls randomness: 0 = focused, 1 = creative</div>
             <div style={{ position: 'relative', marginTop: '8px' }}>
@@ -361,7 +374,7 @@ const DocumentProcessorForm: React.FC = () => {
           </div>
 
           {/* Model */}
-          <div style={{ marginBottom: '24px' }}>
+          <div style={{ marginBottom: '32px' }}>
             <label style={labelStyle}>Model</label>
             <select
               value={formData.model}
