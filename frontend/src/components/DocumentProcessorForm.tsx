@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import axios from 'axios';
+import CollapsibleSection from './CollapsibleSection';
 
 interface FormData {
   role: string;
@@ -84,58 +84,10 @@ const DocumentProcessorForm: React.FC = () => {
     }));
   };
 
-  // CollapsibleSection component
-  const CollapsibleSection: React.FC<{
-    title: string;
-    isExpanded: boolean;
-    onToggle: () => void;
-    children: React.ReactNode;
-    isSubSection?: boolean;
-  }> = ({ title, isExpanded, onToggle, children, isSubSection = false }) => {
-    const headerStyle = isSubSection ? {
-      ...labelStyle,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      cursor: 'pointer',
-      padding: '8px 0',
-      borderBottom: `1px solid ${colors.primary.lightBlue}`,
-      marginBottom: isExpanded ? '8px' : '0'
-    } : {
-      ...sectionHeaderStyle,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      cursor: 'pointer',
-      paddingBottom: '12px'
-    };
 
-    const chevronStyle = {
-      transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-      transition: 'transform 0.3s ease',
-      fontSize: '16px',
-      color: isSubSection ? colors.secondary.darkPurple : colors.tertiary.orange
-    };
-
-    return (
-      <div style={{ marginBottom: isSubSection ? '20px' : '32px' }}>
-        <div style={headerStyle} onClick={onToggle}>
-          <span>{title}</span>
-          <span style={chevronStyle}>▶</span>
-        </div>
-        {isExpanded && (
-          <div style={{ 
-            overflow: 'hidden',
-            transition: 'all 0.3s ease'
-          }}>
-            {children}
-          </div>
-        )}
-      </div>
-    );
-  };
 
   const handleFileUpload = useCallback(async (file: File) => {
+    console.log('uploading');
     setIsUploading(true);
     setUploadError('');
     
@@ -143,9 +95,21 @@ const DocumentProcessorForm: React.FC = () => {
     formDataToSend.append('file', file);
 
     try {
-      const response = await axios.post<FileUploadResponse>('/upload', formDataToSend);
+      console.log('contacting endpoint');
+      const response = await fetch('http://localhost:4005/upload', {
+        method: 'POST',
+        body: formDataToSend, // Don't set Content-Type; the browser adds the boundary.
+      });
 
-      setFileInfo(response.data);
+      if (!response.ok) {
+        const message = await response.text().catch(() => '');
+        throw new Error(message || `Upload failed with status ${response.status}`);
+      }
+
+      const data = (await response.json()) as FileUploadResponse;
+      console.log('xxx');
+
+      setFileInfo(data);
       setFormData(prev => ({ ...prev, file }));
     } catch (error) {
       setUploadError('Failed to upload file. Please try again.');
@@ -157,12 +121,9 @@ const DocumentProcessorForm: React.FC = () => {
 
   const generatePageOptions = (pageCount: number) => {
     const options = [];
-    
-    // Individual page checkboxes
     for (let i = 1; i <= pageCount; i++) {
       options.push(i);
     }
-    
     return options;
   };
 
@@ -184,23 +145,33 @@ const DocumentProcessorForm: React.FC = () => {
         selectedPages = Array.from({ length: pageCount }, (_, i) => i + 1).filter(p => p % 2 === 0);
         break;
       case 'first-half':
-        const halfPoint = Math.ceil(pageCount / 2);
-        selectedPages = Array.from({ length: halfPoint }, (_, i) => i + 1);
+        {
+          const halfPoint = Math.ceil(pageCount / 2);
+          selectedPages = Array.from({ length: halfPoint }, (_, i) => i + 1);
+        }
         break;
       case 'second-half':
-        const secondHalfStart = Math.ceil(pageCount / 2) + 1;
-        selectedPages = Array.from({ length: pageCount - secondHalfStart + 1 }, (_, i) => secondHalfStart + i);
+        {
+          const secondHalfStart = Math.ceil(pageCount / 2) + 1;
+          selectedPages = Array.from({ length: pageCount - secondHalfStart + 1 }, (_, i) => secondHalfStart + i);
+        }
         break;
     }
     
     handlePageSelection(selectedPages);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    try {
-      const response = await axios.post('/process', {
+  const API_BASE = 'http://localhost:4005';
+
+const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+
+  try {
+    console.log('selected pages: ', formData.selectedPages)
+    const response = await fetch(`${API_BASE}/process`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
         role: formData.role,
         task: formData.task,
         context: formData.context,
@@ -209,16 +180,42 @@ const DocumentProcessorForm: React.FC = () => {
         temperature: formData.temperature,
         model: formData.model,
         file_id: fileInfo?.file_id,
-        selected_pages: formData.selectedPages
-      });
+        selected_pages: formData.selectedPages, // make sure this is an array of numbers
+      }),
+    });
 
-      console.log('Processing result:', response.data);
-      alert('Document processed successfully!');
-    } catch (error) {
-      console.error('Processing error:', error);
-      alert('Failed to process document. Please try again.');
+    if (!response.ok) {
+      const message = await response.text().catch(() => '');
+      throw new Error(message || `Processing failed with status ${response.status}`);
     }
-  };
+
+    const data = await response.json();
+    if (!data.success || !data.csv_download_url) {
+      throw new Error(data.error || 'No CSV returned from server.');
+    }
+
+    // Build absolute URL and fetch the CSV as a blob
+    const absoluteUrl = `${API_BASE}${data.csv_download_url}`;
+    const dlResp = await fetch(absoluteUrl);
+    if (!dlResp.ok) throw new Error('CSV download failed.');
+    const blob = await dlResp.blob();
+
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = data.csv_filename || 'gpt_responses.csv';
+    document.body.appendChild(link);
+    link.click();
+    URL.revokeObjectURL(link.href);
+    link.remove();
+
+    // Optional: toast/alert
+    alert('Document processed — CSV downloaded!');
+  } catch (error) {
+    console.error('Processing error:', error);
+    alert('Failed to process document. Please try again.');
+  }
+};
+
 
   const inputStyle = {
     width: '100%',
@@ -230,7 +227,7 @@ const DocumentProcessorForm: React.FC = () => {
     backgroundColor: colors.primary.white,
     color: colors.primary.darkGrey,
     transition: 'all 0.3s ease',
-    outline: 'none'
+    outline: 'none' as const
   };
 
 
@@ -286,6 +283,7 @@ const DocumentProcessorForm: React.FC = () => {
           isSubSection={true}
         >
           <textarea
+            key = {'RoleText'}
             value={formData.role}
             onChange={(e) => handleInputChange('role', e.target.value)}
             rows={4}
@@ -315,6 +313,7 @@ const DocumentProcessorForm: React.FC = () => {
           isSubSection={true}
         >
           <textarea
+            key = {'TaskText'}
             value={formData.task}
             onChange={(e) => handleInputChange('task', e.target.value)}
             rows={4}
