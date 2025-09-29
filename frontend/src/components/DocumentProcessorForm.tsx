@@ -165,14 +165,13 @@ const DocumentProcessorForm: React.FC = () => {
     handlePageSelection(selectedPages);
   };
 
-  const API_BASE = 'http://localhost:4005';
 
 const handleSubmit = async (e: React.FormEvent) => {
   e.preventDefault();
 
   try {
     console.log('selected pages: ', formData.selectedPages)
-    const response = await fetch(`${API_BASE}/process`, {
+    const response = await fetch(`${window.BACKEND_URL}/process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -199,7 +198,7 @@ const handleSubmit = async (e: React.FormEvent) => {
     }
 
     // Build absolute URL and fetch the CSV as a blob
-    const absoluteUrl = `${API_BASE}${data.csv_download_url}`;
+    const absoluteUrl = `${window.BACKEND_URL}${data.csv_download_url}`;
     const dlResp = await fetch(absoluteUrl);
     if (!dlResp.ok) throw new Error('CSV download failed.');
     const blob = await dlResp.blob();

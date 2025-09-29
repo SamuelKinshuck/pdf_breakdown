@@ -8,3 +8,8 @@ x = "http://gad-hosting:8316/"
 }
 
 var BACKEND_URL = x;
+
+// public/config.js
+window.BACKEND_URL = "http://localhost:4005";
+// optional alias if you want it
+window.API_BASE = window.BACKEND_URL;
