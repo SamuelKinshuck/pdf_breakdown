@@ -129,6 +129,7 @@ const CustomDropdown: React.FC<CustomDropdownProps> = ({
       {isOpen && (
         <div
           style={{
+            width: "100% ",
             position: 'absolute',
             top: '100%',
             left: 0,
@@ -148,6 +149,7 @@ const CustomDropdown: React.FC<CustomDropdownProps> = ({
               key={option.value}
               onClick={() => handleOptionSelect(option.value)}
               style={{
+                
                 padding: '14px 20px',
                 cursor: 'pointer',
                 backgroundColor: value === option.value ? colors.primary.lightBlue : colors.primary.white,

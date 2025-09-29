@@ -138,7 +138,6 @@ const DocumentProcessorForm: React.FC = () => {
 
   const handleQuickPageSelection = (type: string, pageCount: number) => {
     let selectedPages: number[] = [];
-    
     switch (type) {
       case 'all':
         selectedPages = Array.from({ length: pageCount }, (_, i) => i + 1);
@@ -223,7 +222,7 @@ const handleSubmit = async (e: React.FormEvent) => {
 
 
   const inputStyle = {
-    width: '100%',
+    width: 'calc(100% - 50px)',
     padding: '16px 20px',
     borderRadius: '8px',
     border: `2px solid ${colors.primary.lightBlue}`,
@@ -583,7 +582,11 @@ const handleSubmit = async (e: React.FormEvent) => {
               <button
                 key={option.value}
                 type="button"
-                onClick={() => handleQuickPageSelection(option.value, fileInfo.page_count)}
+                onClick={
+                  () => {
+                    handleQuickPageSelection(option.value, fileInfo.page_count)
+                  }
+                }
                 style={{
                   padding: '10px 18px',
                   backgroundColor: colors.secondary.lilac,

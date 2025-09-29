@@ -21,7 +21,7 @@ from io import BytesIO
 import base64
 from datetime import datetime
 from PyPDF2 import PdfReader
-from backend.gpt_interface import get_response_from_chatgpt_image
+from gpt_interface import get_response_from_chatgpt_image
 
 import uuid
 from pathlib import Path

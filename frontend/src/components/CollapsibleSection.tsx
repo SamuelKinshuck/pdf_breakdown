@@ -94,7 +94,9 @@ const headerStyle = isSubSection ? {
     cursor: 'pointer',
     padding: '8px 0',
     borderBottom: `1px solid ${colors.primary.lightBlue}`,
-    marginBottom: isExpanded ? '8px' : '0'
+    marginBottom: isExpanded ? '8px' : '0',
+    width: '94%',
+    marginLeft: '3%'
 } : {
     ...sectionHeaderStyle,
     display: 'flex',
@@ -112,7 +114,7 @@ const chevronStyle = {
 };
 
 return (
-    <div style={{ marginBottom: isSubSection ? '20px' : '32px' }}>
+    <div style={{ marginBottom: isSubSection ? '20px' : '64px' }}>
     <div style={headerStyle} onClick={onToggle}>
         <span>{title}</span>
         <span style={chevronStyle}>▶</span>
@@ -120,19 +122,22 @@ return (
     <div
         style={{
         height: isExpanded ? `${contentHeight}px` : '0px',
-        overflow: 'hidden',
+        //overflow: 'hidden',
         transition: 'height 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
         opacity: isExpanded ? 1 : 0,
         transform: isExpanded ? 'translateY(0)' : 'translateY(-8px)',
         transformOrigin: 'top',
-        willChange: 'height, opacity, transform'
+        willChange: 'height, opacity, transform',
+        width: '94%',
+        marginLeft: '3%'
         }}
     >
         <div
         ref={contentRef}
         style={{
             paddingTop: isExpanded ? (isSubSection ? '8px' : '0px') : '0px',
-            transition: 'padding-top 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+            transition: 'padding-top 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+            ...(!isExpanded ? {height: '0px', overflow: 'hidden', 'pointerEvents' : 'none'} : {})
         }}
         >
         {children}
