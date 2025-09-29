@@ -377,7 +377,8 @@ try:
     else:
         HOST = '0.0.0.0'
         PORT = 8316
-except:
+except Exception as e:
+    print(f'error: {e}')
     HOST = 'localhost'
     PORT = 4004
 
