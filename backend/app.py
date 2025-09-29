@@ -370,7 +370,7 @@ def root():
 
 
 try:
-    if BASE_DIR.find('stgadfileshare001') == -1:
+    if str(BASE_DIR).find('stgadfileshare001') == -1:
         print('local')
         HOST = 'localhost'
         PORT = 4004
