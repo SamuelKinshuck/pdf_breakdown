@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import CollapsibleSection from './CollapsibleSection';
+import SuccessModal from './SuccessModal';
 
 interface FormData {
   role: string;
@@ -36,6 +37,9 @@ const DocumentProcessorForm: React.FC = () => {
   const [fileInfo, setFileInfo] = useState<FileUploadResponse | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string>('');
+  
+  // Success modal state
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
   
   // Collapsible sections state
   const [promptConfigExpanded, setPromptConfigExpanded] = useState(true);
@@ -208,8 +212,8 @@ const handleSubmit = async (e: React.FormEvent) => {
     URL.revokeObjectURL(link.href);
     link.remove();
 
-    // Optional: toast/alert
-    alert('Document processed — CSV downloaded!');
+    // Show success modal instead of alert
+    setShowSuccessModal(true);
   } catch (error) {
     console.error('Processing error:', error);
     alert('Failed to process document. Please try again.');
@@ -664,6 +668,13 @@ const handleSubmit = async (e: React.FormEvent) => {
       >
         Process Document
       </button>
+
+      {/* Success Modal */}
+      <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={() => setShowSuccessModal(false)}
+        message="Your document has been successfully processed and the CSV file has been downloaded!"
+      />
     </form>
   );
 };
