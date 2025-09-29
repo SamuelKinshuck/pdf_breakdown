@@ -60,20 +60,6 @@ def _pdf_path_for_file_id(file_id: str) -> str:
     return str(pdf_path)
 
 
-def _pdf_page_count(pdf_path: str) -> int:
-    with open(pdf_path, 'rb') as f:
-        reader = PdfReader(f)
-        return len(reader.pages)
-
-
-def _pil_to_data_url(img, fmt: str = "PNG") -> str:
-    """Encode a PIL image to a data URL (base64)."""
-    buf = BytesIO()
-    img.save(buf, format=fmt)
-    b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
-    mime = 'image/png' if fmt.upper() == 'PNG' else 'image/jpeg'
-    return f"data:{mime};base64,{b64}"
-
 
 def _ensure_pdf_in_folder(original_path: Path, dest_dir: Path) -> Path:
     """
@@ -123,7 +109,7 @@ def _compose_user_prompt(role: str, task: str, context: str, fmt: str,
             f"# Constraints\n{constraints or ''}\n")
 
 
-app = Flask(__name__, static_folder='./frontend/build', static_url_path='')
+app = Flask(__name__, static_folder='../frontend/build', static_url_path='')
 CORS(app)  # allow all origins; tighten in prod
 
 # Configuration
@@ -232,13 +218,6 @@ def count_document_pages(file_path, original_filename):
         print(f"Error counting pages: {e}")
         return 1
 
-
-@app.route('/', methods=['GET'])
-def health_check():
-    return jsonify({
-        "status": "healthy",
-        "message": "Document processing API is running"
-    })
 
 
 @app.route('/upload', methods=['POST'])
@@ -385,5 +364,23 @@ def ping():
     return jsonify({"status": "ok"})
 
 
+@app.route("/")
+def root():
+    return app.send_static_file("index.html")
+
+
+try:
+    if BASE_DIR.find('stgadfileshare001') == -1:
+        print('local')
+        HOST = 'localhost'
+        PORT = 4004
+    else:
+        HOST = '0.0.0.0'
+        PORT = 8316
+except:
+    HOST = 'localhost'
+    PORT = 4004
+
+
 if __name__ == '__main__':
-    app.run(debug=False, host='localhost', port=4005)
+    app.run(debug=False, host=HOST, port=PORT)
