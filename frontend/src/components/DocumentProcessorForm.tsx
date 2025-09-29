@@ -101,7 +101,7 @@ const DocumentProcessorForm: React.FC = () => {
 
     try {
       console.log('contacting endpoint');
-      const response = await fetch('http://localhost:4005/upload', {
+      const response = await fetch(window.BACKEND_URL + 'upload', {
         method: 'POST',
         body: formDataToSend, // Don't set Content-Type; the browser adds the boundary.
       });
