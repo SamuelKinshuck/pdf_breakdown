@@ -1,4 +1,6 @@
-    // Color scheme
+import React, { useRef, useEffect, useState } from 'react';
+
+// Color scheme
 const colors = {
 primary: {
     darkGrey: '#00212E',
@@ -53,6 +55,37 @@ onToggle: () => void;
 children: React.ReactNode;
 isSubSection?: boolean;
 }> = ({ title, isExpanded, onToggle, children, isSubSection = false }) => {
+const contentRef = useRef<HTMLDivElement>(null);
+const [contentHeight, setContentHeight] = useState<number>(0);
+
+// Measure content height when expanded state changes
+useEffect(() => {
+    if (contentRef.current) {
+        const height = contentRef.current.scrollHeight;
+        setContentHeight(height);
+    }
+}, [isExpanded, children]);
+
+// Update height when content changes (e.g., form inputs changing)
+useEffect(() => {
+    const updateHeight = () => {
+        if (contentRef.current && isExpanded) {
+            const height = contentRef.current.scrollHeight;
+            setContentHeight(height);
+        }
+    };
+
+    // Use ResizeObserver if available, otherwise fallback to interval
+    if (window.ResizeObserver && contentRef.current) {
+        const resizeObserver = new ResizeObserver(updateHeight);
+        resizeObserver.observe(contentRef.current);
+        return () => resizeObserver.disconnect();
+    } else {
+        // Fallback for browsers without ResizeObserver
+        const interval = setInterval(updateHeight, 500);
+        return () => clearInterval(interval);
+    }
+}, [isExpanded]);
 const headerStyle = isSubSection ? {
     ...labelStyle,
     display: 'flex',
@@ -84,14 +117,27 @@ return (
         <span>{title}</span>
         <span style={chevronStyle}>▶</span>
     </div>
-    {isExpanded && (
-        <div style={{ 
+    <div
+        style={{
+        height: isExpanded ? `${contentHeight}px` : '0px',
         overflow: 'hidden',
-        transition: 'all 0.3s ease'
-        }}>
+        transition: 'height 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+        opacity: isExpanded ? 1 : 0,
+        transform: isExpanded ? 'translateY(0)' : 'translateY(-8px)',
+        transformOrigin: 'top',
+        willChange: 'height, opacity, transform'
+        }}
+    >
+        <div
+        ref={contentRef}
+        style={{
+            paddingTop: isExpanded ? (isSubSection ? '8px' : '0px') : '0px',
+            transition: 'padding-top 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+        }}
+        >
         {children}
         </div>
-    )}
+    </div>
     </div>
 );
 };
