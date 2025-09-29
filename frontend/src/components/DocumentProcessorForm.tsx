@@ -266,22 +266,22 @@ const handleSubmit = async (e: React.FormEvent) => {
   return (
     <form onSubmit={handleSubmit} style={{ 
       fontFamily: 'system-ui, -apple-system, sans-serif',
-      padding: '32px',
+      padding: '40px',
       maxWidth: '1400px',
       margin: '0 auto',
       backgroundColor: colors.primary.offWhite,
-      borderRadius: '16px',
-      boxShadow: `0 8px 32px ${colors.tertiary.blueGrey}20`
+      borderRadius: '20px',
+      boxShadow: `0 12px 40px ${colors.tertiary.blueGrey}25`
     }}>
       {/* Prompt Configuration Section */}
       <CollapsibleSection
-        title="Prompt Configuration"
+        title="⚙️ Prompt Configuration"
         isExpanded={promptConfigExpanded}
         onToggle={() => setPromptConfigExpanded(!promptConfigExpanded)}
       >
         {/* Role */}
         <CollapsibleSection
-          title="Role"
+          title="👤 Role"
           isExpanded={promptSectionsExpanded.role}
           onToggle={() => togglePromptSection('role')}
           isSubSection={true}
@@ -311,7 +311,7 @@ const handleSubmit = async (e: React.FormEvent) => {
 
         {/* Task */}
         <CollapsibleSection
-          title="Task"
+          title="📋 Task"
           isExpanded={promptSectionsExpanded.task}
           onToggle={() => togglePromptSection('task')}
           isSubSection={true}
@@ -341,7 +341,7 @@ const handleSubmit = async (e: React.FormEvent) => {
 
         {/* Context */}
         <CollapsibleSection
-          title="Context"
+          title="🔍 Context"
           isExpanded={promptSectionsExpanded.context}
           onToggle={() => togglePromptSection('context')}
           isSubSection={true}
@@ -370,7 +370,7 @@ const handleSubmit = async (e: React.FormEvent) => {
 
         {/* Format */}
         <CollapsibleSection
-          title="Format"
+          title="📝 Format"
           isExpanded={promptSectionsExpanded.format}
           onToggle={() => togglePromptSection('format')}
           isSubSection={true}
@@ -399,7 +399,7 @@ const handleSubmit = async (e: React.FormEvent) => {
 
         {/* Constraints */}
         <CollapsibleSection
-          title="Constraints"
+          title="⚠️ Constraints"
           isExpanded={promptSectionsExpanded.constraints}
           onToggle={() => togglePromptSection('constraints')}
           isSubSection={true}
@@ -429,13 +429,13 @@ const handleSubmit = async (e: React.FormEvent) => {
 
       {/* Model Configuration Section */}
       <CollapsibleSection
-        title="Model Configuration"
+        title="🤖 Model Configuration"
         isExpanded={modelConfigExpanded}
         onToggle={() => setModelConfigExpanded(!modelConfigExpanded)}
       >
         {/* Temperature */}
         <div style={{ marginBottom: '32px' }}>
-          <label style={labelStyle}>Temperature: {formData.temperature}</label>
+          <label style={labelStyle}>🌡️ Temperature: {formData.temperature}</label>
           <div style={helperTextStyle}>Controls randomness: 0 = focused, 1 = creative</div>
           <div style={{ position: 'relative', marginTop: '8px' }}>
             <input
@@ -464,7 +464,7 @@ const handleSubmit = async (e: React.FormEvent) => {
 
         {/* Model */}
         <div style={{ marginBottom: '32px' }}>
-          <label style={labelStyle}>Model</label>
+          <label style={labelStyle}>⚡ Model</label>
           <select
             value={formData.model}
             onChange={(e) => handleInputChange('model', e.target.value)}
@@ -498,7 +498,7 @@ const handleSubmit = async (e: React.FormEvent) => {
 
       {/* File Upload */}
       <div style={{ marginBottom: '32px' }}>
-        <h2 style={sectionHeaderStyle}>Document Upload</h2>
+        <h2 style={sectionHeaderStyle}>📁 Document Upload</h2>
         <div
           style={{
             border: `2px dashed ${colors.primary.lightBlue}`,
@@ -580,31 +580,42 @@ const handleSubmit = async (e: React.FormEvent) => {
       {/* Page Selection - Only show if file is uploaded */}
       {fileInfo && (
         <div style={{ marginBottom: '32px' }}>
-          <label style={labelStyle}>Pages (Total: {fileInfo.page_count})</label>
+          <label style={labelStyle}>📄 Pages (Total: {fileInfo.page_count})</label>
           
           {/* Quick Selection Buttons */}
           <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {[
-              { label: 'All Pages', value: 'all' },
-              { label: 'Odd Pages', value: 'odd' },
-              { label: 'Even Pages', value: 'even' },
-              { label: 'First Half', value: 'first-half' },
-              { label: 'Second Half', value: 'second-half' }
+              { label: '📄 All Pages', value: 'all' },
+              { label: '1️⃣ Odd Pages', value: 'odd' },
+              { label: '2️⃣ Even Pages', value: 'even' },
+              { label: '⬆️ First Half', value: 'first-half' },
+              { label: '⬇️ Second Half', value: 'second-half' }
             ].map((option) => (
               <button
                 key={option.value}
                 type="button"
                 onClick={() => handleQuickPageSelection(option.value, fileInfo.page_count)}
                 style={{
-                  padding: '8px 16px',
+                  padding: '10px 18px',
                   backgroundColor: colors.secondary.lilac,
                   color: colors.primary.white,
                   border: 'none',
-                  borderRadius: '6px',
+                  borderRadius: '8px',
                   cursor: 'pointer',
                   fontSize: '14px',
                   fontWeight: '500',
-                  transition: 'background-color 0.3s ease'
+                  transition: 'all 0.3s ease',
+                  boxShadow: `0 2px 8px ${colors.secondary.lilac}30`
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = colors.secondary.darkPurple;
+                  e.currentTarget.style.transform = 'translateY(-1px)';
+                  e.currentTarget.style.boxShadow = `0 4px 12px ${colors.secondary.darkPurple}40`;
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = colors.secondary.lilac;
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = `0 2px 8px ${colors.secondary.lilac}30`;
                 }}
               >
                 {option.label}
@@ -669,7 +680,7 @@ const handleSubmit = async (e: React.FormEvent) => {
           letterSpacing: '1px'
         }}
       >
-        Process Document
+        🚀 Process Document
       </button>
 
       {/* Success Modal */}
