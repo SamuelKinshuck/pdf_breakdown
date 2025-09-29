@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import CollapsibleSection from './CollapsibleSection';
 import SuccessModal from './SuccessModal';
+import CustomDropdown from './CustomDropdown';
 
 interface FormData {
   role: string;
@@ -465,33 +466,21 @@ const handleSubmit = async (e: React.FormEvent) => {
         {/* Model */}
         <div style={{ marginBottom: '32px' }}>
           <label style={labelStyle}>⚡ Model</label>
-          <select
+          <CustomDropdown
             value={formData.model}
-            onChange={(e) => handleInputChange('model', e.target.value)}
-            style={{
-              ...inputStyle,
-              cursor: 'pointer',
-              appearance: 'none',
-              WebkitAppearance: 'none',
-              MozAppearance: 'none',
-              backgroundImage: `url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='${colors.tertiary.blueGrey.replace('#', '%23')}' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e")`,
-              backgroundPosition: 'right 12px center',
-              backgroundRepeat: 'no-repeat',
-              backgroundSize: '16px',
-              paddingRight: '40px'
-            }}
+            onChange={(value) => handleInputChange('model', value)}
+            options={[
+              { value: 'GPT-4.1', label: 'GPT-4.1', icon: '🤖' },
+              { value: 'GPT-5', label: 'GPT-5', icon: '⚡' }
+            ]}
+            placeholder="Select AI Model"
             onFocus={(e) => {
-              e.target.style.borderColor = colors.tertiary.blue;
-              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+              // Optional: Add any focus handling
             }}
             onBlur={(e) => {
-              e.target.style.borderColor = colors.primary.lightBlue;
-              e.target.style.boxShadow = 'none';
+              // Optional: Add any blur handling
             }}
-          >
-            <option value="GPT-4.1">GPT-4.1</option>
-            <option value="GPT-5">GPT-5</option>
-          </select>
+          />
           <div style={helperTextStyle}>Select the AI model for processing</div>
         </div>
       </CollapsibleSection>
