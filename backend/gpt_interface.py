@@ -26,6 +26,9 @@ if subscription_key:
 
 # Function to get a response from ChatGPT with a simple system and user prompt
 def get_response_from_chatgpt_simple(system_prompt: str, user_prompt: str, model: str) -> str:
+    if client is None:
+        return "API key not available"
+    
     response = client.chat.completions.create(
         model=model,  # The model name to be used
         messages=[
@@ -39,6 +42,9 @@ def get_response_from_chatgpt_simple(system_prompt: str, user_prompt: str, model
 # Function to get a response from ChatGPT, with more flexibility over inputs.
 #`functions` and `function_name` allow us to specify a precise format we want the response in.
 def get_response_from_chatgpt_with_functions(user_prompt: str, system_prompt: str, model: str, temperature: float, function_name: str, functions: List) -> str:
+    if client is None:
+        return "API key not available"
+    
     response = client.chat.completions.create(
         model=model,  # The model name to be used
         messages=[
@@ -68,6 +74,9 @@ def local_image_to_data_url(image_path: str) -> str:
     return f"data:{mime_type};base64,{base64_encoded_data}"
 
 def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_path: str, model: str, pre_compiled_image = None) -> str:
+    if client is None:
+        return "API key not available"
+    
     if pre_compiled_image is not None:
         image_data_url = pre_compiled_image
     else:
@@ -90,6 +99,9 @@ def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_
 
 
 def get_response_from_chatgpt_image_and_functions(system_prompt: str, user_prompt: str, image_path: str, model: str, functions: List, function_name: str, pre_compiled_image = None) -> str:
+    if client is None:
+        return "API key not available"
+    
     if pre_compiled_image is not None:
         image_data_url = pre_compiled_image
     else:
@@ -123,6 +135,9 @@ def get_response_from_chatgpt_multiple_image_and_functions(
     function_name: str,
     pre_compiled_images=None
 ) -> str:
+    if client is None:
+        return "API key not available"
+    
     if pre_compiled_images is not None:
         image_data_urls = pre_compiled_images
     else:
@@ -157,6 +172,9 @@ def get_response_from_chatgpt_multiple_image(
     model: str,
     pre_compiled_images=None
 ) -> str:
+    if client is None:
+        return "API key not available"
+    
     if pre_compiled_images is not None:
         image_data_urls = pre_compiled_images
     else:
@@ -181,7 +199,9 @@ def get_response_from_chatgpt_multiple_image(
     return response.choices[0].message.content
 
 def get_embedding(text: str, model = "text-embedding-3-large"):
-
+    if client is None:
+        return []
+    
     try:
         response = client.embeddings.create(
             model=model,
