@@ -10,18 +10,40 @@ Preferred communication style: Simple, everyday language.
 
 ## System Architecture
 
+### Environment Configuration
+The application supports multiple deployment environments with automatic detection:
+
+**Replit Environment:**
+- Backend: Runs on `0.0.0.0:8000` (detected via `REPL_ID` or `REPLIT_DEV_DOMAIN` env vars)
+- Frontend: Served by Flask from the backend (same-origin setup)
+- Backend URL: Uses `window.location.origin` for API calls
+- PYTHONPATH: Set to `/home/runner/workspace` for proper module imports
+
+**Local Development Environment:**
+- Backend: Runs on `localhost:4005`
+- Frontend: Can run separately on port 3000 or served by Flask
+- Backend URL: `http://localhost:4005/`
+- Detected by `localhost` in window URL
+
+**stgadfileshare001 Environment:**
+- Backend: Runs on `0.0.0.0:8316`
+- Backend URL: `http://gad-hosting:8316/`
+- Detected by `stgadfileshare001` in the file path
+
 ### Frontend Architecture
 - **Framework**: React 19 with TypeScript for type safety and modern development
 - **Styling**: Tailwind CSS for utility-first styling with custom color scheme
 - **Forms**: React Hook Form for efficient form state management and validation
 - **HTTP Client**: Axios for API communication with the backend
 - **Build Tool**: Create React App for development and build pipeline
+- **Configuration**: Dynamic backend URL detection via `config.js` based on environment
 
 The frontend follows a component-based architecture with a main DocumentProcessorForm component handling file uploads and AI processing configuration. The UI uses a custom color scheme with dark grey primary colors and light blue accents.
 
 ### Backend Architecture
 - **Framework**: Flask as a lightweight web framework for Python
 - **CORS**: Flask-CORS enabled for cross-origin requests from the frontend
+- **Static Serving**: Serves the React build from `../frontend/build` in production
 - **File Processing**: Multi-format document support with conversion capabilities
   - PDF processing using PyPDF2
   - DOCX processing using python-docx
