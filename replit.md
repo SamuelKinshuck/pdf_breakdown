@@ -85,7 +85,18 @@ The application now supports direct output to SharePoint in addition to browser 
 
 **Components:**
 - `OutputLocationModal.tsx` - Modal interface for selecting output location and navigating SharePoint folders
+- `ProcessingDetailsModal.tsx` - Modal for viewing detailed processing progress (October 2025)
 - SharePoint context caching with 5-minute TTL for improved performance
+
+### Processing Progress Display (October 2025)
+The application features an improved progress display system for document processing:
+- **Concise Progress View**: Shows status, progress bar, percentage, pages done/total, and error messages in a compact display
+- **Detailed Progress Modal**: Users can click "View Details" to open a modal showing comprehensive processing information including:
+  - Full status information with color-coded states
+  - Detailed progress breakdown
+  - All processed pages with their GPT responses in an organized, scrollable view
+  - Error details if any issues occur
+- The modal follows the app's design system with consistent styling and animations
 
 ## External Dependencies
 
