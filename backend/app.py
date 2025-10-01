@@ -1,31 +1,151 @@
-from flask import Flask, request, jsonify
 from flask_cors import CORS
 import os
 from werkzeug.utils import secure_filename
 import PyPDF2
 from docx import Document
 from pptx import Presentation
-from pdf2image import convert_from_path
-import tempfile
+
 import shutil
 import subprocess
-import io
-import base64
-from PIL import Image
+
 import fitz
 from openai import BadRequestError
 
 from flask import Flask, request, jsonify, send_from_directory
 import pandas as pd
-from io import BytesIO
 import base64
 from datetime import datetime
 from PyPDF2 import PdfReader
-from gpt_interface import get_response_from_chatgpt_image
+from backend.gpt_interface import get_response_from_chatgpt_image
 
 import uuid
 from pathlib import Path
 from typing import List, Dict
+import threading
+
+from dataclasses import dataclass
+import time
+from typing import Any
+from backend.jobstate import JobState
+import traceback
+
+# ---- Import your existing utilities -----------------------------------------
+from backend.sharepoint import (
+    sharepoint_create_context,
+    sharepoint_folder_exists,
+    sharepoint_file_exists,
+    sharepoint_export_df_to_csv,
+    sharepoint_delete_file_by_path
+)
+
+@dataclass
+class ConnectionInfo:
+    site_url: str
+    tenant: str
+    client_id: str
+
+_CONNECTIONS: Dict[str, ConnectionInfo] = {}
+
+# Cached ClientContext objects keyed by context_id
+_CTX_CACHE: Dict[str, tuple[Any, float]] = {}  # value = (ctx, created_timestamp)
+_CTX_CACHE_LOCK = threading.Lock()
+CTX_TTL_SECONDS = 300
+
+
+_JOBS: Dict[str, JobState] = {}
+_JOBS_LOCK = threading.Lock()
+
+
+# -----------------------------------------------------------------------------
+# Cached context helper
+# -----------------------------------------------------------------------------
+
+def _new_ctx(conn_id: str):
+    """Return a cached ClientContext, refreshing if older than CTX_TTL_SECONDS.
+
+    We keep an in‑memory cache so repeated API calls in short succession don’t
+    trigger the slow device‑code flow that pops a browser window on the server.
+    """
+    info = _CONNECTIONS.get(conn_id)
+    if info is None:
+        raise ValueError("Invalid or expired context_id")
+
+    now = time.time()
+    with _CTX_CACHE_LOCK:
+        cached = _CTX_CACHE.get(conn_id)
+        if cached is not None:
+            ctx, created_at = cached
+            if now - created_at < CTX_TTL_SECONDS:
+                return ctx  # fresh enough, re‑use it
+        # Either no cache entry or it is stale – create a new one
+        ctx = sharepoint_create_context(
+            info.site_url, tenant=info.tenant, client_id=info.client_id
+        )
+        _CTX_CACHE[conn_id] = (ctx, now)
+        return ctx
+
+def list_children(ctx, server_relative_folder: str):
+    """Return dict with 'folders' and 'files' lists for a folder."""
+    folder = ctx.web.get_folder_by_server_relative_url(server_relative_folder).expand(["Folders", "Files"]).get().execute_query()
+    folders = []
+    for f in folder.folders:  # type: ignore[attr-defined]
+        folders.append({
+            "name": f.name,
+            "serverRelativeUrl": f.serverRelativeUrl,
+            "timeCreated": getattr(f, "time_created", None),
+            "timeLastModified": getattr(f, "time_last_modified", None),
+        })
+    files = []
+    for fl in folder.files:  # type: ignore[attr-defined]
+        files.append({
+            "name": fl.name,
+            "serverRelativeUrl": fl.serverRelativeUrl,
+            "length": getattr(fl, "length", None),
+            "timeCreated": getattr(fl, "time_created", None),
+            "timeLastModified": getattr(fl, "time_last_modified", None),
+        })
+    return {"folders": folders, "files": files}
+
+
+def walk_tree(ctx, root: str, depth: int = 2):
+    """Recursively collect folder & file info down to 'depth' levels."""
+    def _walk(path: str, level: int):
+        node = list_children(ctx, path)
+        result = {
+            "path": path,
+            "folders": node["folders"],
+            "files": node["files"],
+        }
+        if level < depth:
+            result["children"] = []
+            for sub in node["folders"]:
+                result["children"].append(_walk(sub["serverRelativeUrl"], level + 1))
+        return result
+    return _walk(root, 0)
+
+
+def search_tree(ctx, root: str, query: str, depth: int = 2):
+    """Naive substring search over name, up to depth."""
+    q = query.lower()
+    matches = {
+        "folders": [],
+        "files": [],
+    }
+
+    def _walk(path: str, level: int):
+        node = list_children(ctx, path)
+        for f in node["folders"]:
+            if q in f["name"].lower():
+                matches["folders"].append(f)
+        for fl in node["files"]:
+            if q in fl["name"].lower():
+                matches["files"].append(fl)
+        if level < depth:
+            for sub in node["folders"]:
+                _walk(sub["serverRelativeUrl"], level + 1)
+
+    _walk(root, 0)
+    return matches
 
 try:
     BASE_DIR = Path(__file__).resolve().parent
@@ -136,6 +256,117 @@ def download(filename):
                                filename,
                                as_attachment=True)
 
+
+
+@app.route("/api/context", methods=["POST"])
+def create_context():
+    data = request.get_json(force=True)
+    #in the frontend, we need to default to whatever you see here for the second argument
+    #of hte `get`s
+    site_url = data.get("site_url", "https://tris42.sharepoint.com/sites/GADOpportunitiesandSolutions")
+    tenant = data.get("tenant", "tris42.onmicrosoft.com")
+    client_id = data.get("client_id", "d44a05d5-c6a5-4bbb-82d2-443123722380")
+    if not site_url:
+        return jsonify({"error": "site_url is required"}), 400
+    try:
+        sharepoint_create_context(site_url, tenant=tenant, client_id=client_id)
+
+        context_id = str(uuid.uuid4())
+        _CONNECTIONS[context_id] = ConnectionInfo(site_url, tenant, client_id)
+        return jsonify({"context_id": context_id})
+    except Exception as e:
+        tb = traceback.format_exc()
+        print('!' * 80)
+        print('error in create_context')
+        print(tb)
+        return jsonify({"error": str(tb)}), 500
+
+
+@app.route("/api/folder/list")
+def folder_list():
+    context_id = request.args.get("context_id")
+    folder = request.args.get('folder')
+    if not (context_id and folder):
+        return jsonify({"error": "context_id and folder are required"}), 400
+    try:
+        ctx = _new_ctx(context_id)
+        if not sharepoint_folder_exists(ctx, folder):
+            return jsonify({"error": "Folder not found"}), 404
+        return jsonify(list_children(ctx, folder))
+    except Exception as e:
+        tb = traceback.format_exc()
+        print('!' * 80)
+        print('error in folder_list')
+        print(tb)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/folder/tree")
+def folder_tree():
+    context_id = request.args.get("context_id")
+    folder = request.args.get("folder")
+    depth = int(request.args.get("depth", 2))
+    if not (context_id and folder):
+        return jsonify({"error": "context_id and folder are required"}), 400
+    try:
+        ctx = _new_ctx(context_id)
+        if not sharepoint_folder_exists(ctx, folder):
+            return jsonify({"error": "Folder not found"}), 404
+        return jsonify(walk_tree(ctx, folder, depth))
+    except Exception as e:
+        tb = traceback.format_exc()
+        print('!' * 80)
+        print('error in folder_tree')
+        print(tb)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/search")
+def search_endpoint():
+    context_id = request.args.get("context_id")
+    folder = request.args.get("folder")
+    query = request.args.get("q")
+    depth = int(request.args.get("depth", 2))
+    if not (context_id and folder and query):
+        return jsonify({"error": "context_id, folder and q are required"}), 400
+    try:
+        ctx = _new_ctx(context_id)
+        if not sharepoint_folder_exists(ctx, folder):
+            return jsonify({"error": "Folder not found"}), 404
+        return jsonify(search_tree(ctx, folder, query, depth))
+    except Exception as e:
+        tb = traceback.format_exc()
+        print('!' * 80)
+        print('error in search_endpoint')
+        print(tb)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/folder/exists")
+def folder_exists_endpoint():
+    context_id = request.args.get("context_id")
+    folder = request.args.get("folder")
+    if not (context_id and folder):
+        return jsonify({"error": "context_id and folder are required"}), 400
+    try:
+        ctx = _new_ctx(context_id)
+        return jsonify({"exists": bool(sharepoint_folder_exists(ctx, folder))})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/file/exists")
+def file_exists_endpoint():
+    context_id = request.args.get("context_id")
+    folder = request.args.get("folder")
+    filename = request.args.get("filename")
+    if not (context_id and folder and filename):
+        return jsonify({"error": "context_id, folder and filename are required"}), 400
+    try:
+        ctx = _new_ctx(context_id)
+        return jsonify({"exists": bool(sharepoint_file_exists(ctx, folder, filename))})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 def convert_to_pdf(file_path, original_filename):
     """Convert docx or pptx files to PDF and return the PDF path"""
@@ -276,7 +507,145 @@ def upload_file():
         'file_id': upload_id
     })
 
+# -----------------------------------------------------------------------------
+# Helpers for async jobs
+# -----------------------------------------------------------------------------
+def _now_iso() -> str:
+    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
 
+def _init_job_state(job_id: str,
+                    file_id: str,
+                    selected_pages: List[int],
+                    model: str) -> dict:
+    # Keep the structure simple and serializable
+    return {
+        "job_id": job_id,
+        "file_id": file_id,
+        "model": model,
+        "status": "queued",                # queued | running | completed | error
+        "error": None,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+        "started_at": None,
+        "finished_at": None,
+        "pages_total": len(selected_pages),
+        "selected_pages": sorted(selected_pages),
+        "pages_done": 0,
+        "last_page": None,
+        "rows": [],                        # list[{"page": int, "gpt_response": str}]
+        "csv_filename": None,
+        "csv_download_url": None,
+    }
+
+def _save_job(job_id: str, update: dict):
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if job is None:
+            return
+        job.update(update)
+        job["updated_at"] = _now_iso()
+
+def _run_process_job(job_id: str,
+                     file_id: str,
+                     selected_pages: List[int],
+                     system_prompt: str,
+                     user_prompt: str,
+                     model: str) -> None:
+    """
+    Background worker that does the actual page-by-page processing and updates
+    the _JOBS[job_id] state so /process_poll can report progress.
+    """
+    # Mark job as running
+    _save_job(job_id, {"status": "running", "started_at": _now_iso()})
+
+    try:
+        # Resolve PDF + prep images in the worker (keeps main request snappy)
+        pdf_path = _pdf_path_for_file_id(file_id)
+        images_for_gpt = _images_from_df_path(pdf_path, selected_pages)
+
+        pages_in_order = sorted([p for p in selected_pages if p in images_for_gpt])
+
+        rows: List[Dict[str, str]] = []
+        for idx, page_no in enumerate(pages_in_order, start=1):
+            pre_compiled_image = images_for_gpt.get(page_no)
+            if pre_compiled_image is None:
+                # Should not happen, but keep moving
+                rows.append({"page": page_no, "gpt_response": "Page image not available"})
+                _save_job(job_id, {
+                    "pages_done": idx,
+                    "last_page": page_no,
+                    "rows": sorted(rows, key=lambda r: r["page"]),
+                })
+                continue
+
+            # Do the GPT call
+            if os.getenv('OPENAI_API_KEY') is None:
+                response = 'No API key found'
+            else:
+                try:
+                    response = get_response_from_chatgpt_image(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        image_path=None,
+                        model=model,
+                        pre_compiled_image=pre_compiled_image
+                    )
+                except BadRequestError:
+                    response = 'GPT refused to process this page'
+                except Exception:
+                    response = 'Unable to get a response from GPT for this page'
+
+            rows.append({"page": page_no, "gpt_response": response})
+
+            # Update incremental progress
+            _save_job(job_id, {
+                "pages_done": idx,
+                "last_page": page_no,
+                "rows": sorted(rows, key=lambda r: r["page"]),
+            })
+
+        # If nothing processed, mark and bail
+        if not rows:
+            _save_job(job_id, {
+                "status": "error",
+                "error": "Could not find selected pages to process.",
+                "finished_at": _now_iso()
+            })
+            return
+
+        # Save final CSV into the upload folder (same naming as before)
+        df = pd.DataFrame(sorted(rows, key=lambda r: r["page"]), columns=["page", "gpt_response"])
+        timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
+        csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
+        upload_dir = UPLOAD_ROOT / file_id
+        csv_path = upload_dir / csv_filename
+        df.to_csv(str(csv_path), index=False)
+
+        # Mark job complete
+        _save_job(job_id, {
+            "status": "completed",
+            "finished_at": _now_iso(),
+            "csv_filename": csv_filename,
+            "csv_download_url": f"/download/{file_id}/{csv_filename}",
+        })
+
+    except Exception as e:
+        # Capture traceback for debugging
+        tb = traceback.format_exc()
+        print('!' * 80)
+        print('error in _run_process_job')
+        print(tb)
+
+        _save_job(job_id, {
+            "status": "error",
+            "error": f"{e}",
+            "finished_at": _now_iso(),
+        })
+
+
+# -----------------------------------------------------------------------------
+# DROP-IN REPLACEMENT: /process (now asynchronous)
+# -----------------------------------------------------------------------------
 @app.route('/process', methods=['POST'])
 def process_document():
     data = request.get_json()
@@ -284,7 +653,7 @@ def process_document():
     print('data in /process')
     print(data)
 
-    # Extract form data...
+    # Extract the same form data as before
     role = data.get('role', '')
     task = data.get('task', '')
     context = data.get('context', '')
@@ -294,6 +663,7 @@ def process_document():
     file_id = data.get('file_id', '')
     selected_pages = data.get('selected_pages', [])
 
+    # Validate inputs (same constraints as before)
     if not file_id:
         return jsonify({'success': False, 'error': 'file_id is required'}), 400
     if not isinstance(selected_pages, list) or not selected_pages:
@@ -302,61 +672,83 @@ def process_document():
             'error': 'selected_pages must be a non-empty list'
         }), 400
 
-    # Resolve canonical PDF for this upload
+    # Resolve canonical PDF up-front only to fail fast if missing
     try:
-        pdf_path = _pdf_path_for_file_id(
-            file_id)  # uploads/<file_id>/document.pdf
+        _ = _pdf_path_for_file_id(file_id)
     except Exception as e:
         return jsonify({
             'success': False,
             'error': f'Could not resolve PDF: {e}'
         }), 400
 
-    images_for_gpt = _images_from_df_path(pdf_path, selected_pages)
+    # Prepare prompts
     system_prompt = 'you are a helpful assistant'
-    user_prompt = _compose_user_prompt(role, task, context, format_field,
-                                       constraints)
-    rows = []
-    for key, value in images_for_gpt.items():
-        print(f'Asking GPT to process page {key}')
-        print(key)
-        if os.getenv('OPENAI_API_KEY') is None:
-            rows.append({'gpt_response': 'No API key found', 'page': key})
-            continue
-        try:
-            response = get_response_from_chatgpt_image(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                image_path=None,
-                model=model,
-                pre_compiled_image=value)
-        except BadRequestError:
-            response = 'GPT refused to process this page'
-        except:
-            response = 'Unable to get a response from GPT for this page'
-        rows.append({'gpt_response': response, 'page': key})
+    user_prompt = _compose_user_prompt(role, task, context, format_field, constraints)
 
-    if not rows:
-        return jsonify({
-            'success': False,
-            'message': 'could not find selected pages'
-        })
+    # Create a job and kick off a worker thread
+    job_id = str(uuid.uuid4())
+    state = _init_job_state(job_id, file_id, selected_pages, model)
+    with _JOBS_LOCK:
+        _JOBS[job_id] = state  # type: ignore[assignment]
 
-    # Save CSV into the same upload folder
-    df = pd.DataFrame(rows, columns=['page', 'gpt_response'])
-    timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
-    csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
-    upload_dir = UPLOAD_ROOT / file_id
-    csv_path = upload_dir / csv_filename
-    df.to_csv(str(csv_path), index=False)
+    worker = threading.Thread(
+        target=_run_process_job,
+        args=(job_id, file_id, selected_pages, system_prompt, user_prompt, model),
+        daemon=True
+    )
+    worker.start()
 
+    # Immediate response so the client can poll for status and partial results
     return jsonify({
         'success': True,
-        'message': 'Document processed successfully',
-        'result_count': len(rows),
-        'csv_filename': csv_filename,
-        'csv_download_url': f"/download/{file_id}/{csv_filename}"
-    })
+        'message': 'Processing started',
+        'job_id': job_id,
+        'file_id': file_id,
+        'pages_total': len(selected_pages),
+        'selected_pages': sorted(selected_pages),
+        'status': 'queued',
+        'poll_url': f"/process_poll?job_id={job_id}"
+    }), 202
+
+
+# -----------------------------------------------------------------------------
+# NEW ENDPOINT: /process_poll
+# Reports progress + partial results in an orderly list of dicts
+# -----------------------------------------------------------------------------
+@app.route('/process_poll', methods=['GET'])
+def process_poll():
+    job_id = request.args.get('job_id')
+    if not job_id:
+        return jsonify({'success': False, 'error': 'job_id is required'}), 400
+
+    with _JOBS_LOCK:
+        state = _JOBS.get(job_id)
+        if state is None:
+            return jsonify({'success': False, 'error': 'job not found'}), 404
+        # shallow copy whole dict + rows list for a stable snapshot
+        snap = dict(state)
+        snap_rows = list(snap.get("rows", []))
+
+    rows_ordered = sorted(snap_rows, key=lambda r: r.get("page", 0))
+    payload = {
+        'success': True,
+        'job_id': snap.get('job_id'),
+        'file_id': snap.get('file_id'),
+        'status': snap.get('status'),
+        'error': snap.get('error'),
+        'created_at': snap.get('created_at'),
+        'updated_at': snap.get('updated_at'),
+        'started_at': snap.get('started_at'),
+        'finished_at': snap.get('finished_at'),
+        'pages_total': snap.get('pages_total'),
+        'pages_done': snap.get('pages_done'),
+        'last_page': snap.get('last_page'),
+        'responses': rows_ordered,
+        'csv_filename': snap.get('csv_filename'),
+        'csv_download_url': snap.get('csv_download_url'),
+    }
+    return jsonify(payload), 200
+
 
 
 @app.route("/api/ping")
@@ -373,14 +765,14 @@ try:
     if str(BASE_DIR).find('stgadfileshare001') == -1:
         print('local')
         HOST = 'localhost'
-        PORT = 4004
+        PORT = 4005
     else:
         HOST = '0.0.0.0'
         PORT = 8316
 except Exception as e:
     print(f'error: {e}')
     HOST = 'localhost'
-    PORT = 4004
+    PORT = 4005
 
 
 if __name__ == '__main__':

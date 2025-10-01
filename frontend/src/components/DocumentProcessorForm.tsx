@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import CollapsibleSection from './CollapsibleSection';
 import SuccessModal from './SuccessModal';
 import CustomDropdown from './CustomDropdown';
@@ -22,6 +22,24 @@ interface FileUploadResponse {
   file_id: string;
 }
 
+// --- add near your other interfaces ---
+interface PollResponse {
+  success: boolean;
+  job_id: string;
+  file_id: string;
+  status: 'queued' | 'running' | 'completed' | 'error' | string;
+  error?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  pages_total: number;
+  pages_done: number;
+  last_page?: number | null;
+  responses: { page: number; gpt_response: string }[];
+  csv_filename?: string | null;
+  csv_download_url?: string | null;
+}
 const DocumentProcessorForm: React.FC = () => {
   const [formData, setFormData] = useState<FormData>({
     role: '',
@@ -37,7 +55,35 @@ const DocumentProcessorForm: React.FC = () => {
 
   const [fileInfo, setFileInfo] = useState<FileUploadResponse | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false)
   const [uploadError, setUploadError] = useState<string>('');
+
+  // --- add to component state ---
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [pollUrl, setPollUrl] = useState<string | null>(null);
+  const [pollData, setPollData] = useState<PollResponse | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [isPolling, setIsPolling] = useState(false);
+
+  const percent = (p: PollResponse | null) => {
+    if (!p || !p.pages_total) return 0;
+    const done = Math.min(p.pages_done ?? 0, p.pages_total);
+    return Math.round((done / p.pages_total) * 100);
+  };
+
+  const downloadCsv = async (absoluteUrl: string, filename?: string | null) => {
+    const dlResp = await fetch(absoluteUrl);
+    if (!dlResp.ok) throw new Error('CSV download failed.');
+    const blob = await dlResp.blob();
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename || 'gpt_responses.csv';
+    document.body.appendChild(link);
+    link.click();
+    URL.revokeObjectURL(link.href);
+    link.remove();
+  };
+
   
   // Success modal state
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -164,60 +210,109 @@ const DocumentProcessorForm: React.FC = () => {
     
     handlePageSelection(selectedPages);
   };
+  console.log('isProcessing', isProcessing)
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-const handleSubmit = async (e: React.FormEvent) => {
-  e.preventDefault();
+    if (!fileInfo?.file_id || formData.selectedPages.length === 0) return;
 
-  try {
-    console.log('selected pages: ', formData.selectedPages)
-    const response = await fetch(`${window.BACKEND_URL}/process`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        role: formData.role,
-        task: formData.task,
-        context: formData.context,
-        format: formData.format,
-        constraints: formData.constraints,
-        temperature: formData.temperature,
-        model: formData.model,
-        file_id: fileInfo?.file_id,
-        selected_pages: formData.selectedPages, // make sure this is an array of numbers
-      }),
-    });
+    try {
+      setIsProcessing(true);
+      setPollError(null);
+      setPollData(null);
+      setJobId(null);
+      setPollUrl(null);
 
-    if (!response.ok) {
-      const message = await response.text().catch(() => '');
-      throw new Error(message || `Processing failed with status ${response.status}`);
+      const response = await fetch(`${window.BACKEND_URL}/process`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          role: formData.role,
+          task: formData.task,
+          context: formData.context,
+          format: formData.format,
+          constraints: formData.constraints,
+          temperature: formData.temperature,
+          model: formData.model,
+          file_id: fileInfo.file_id,
+          selected_pages: formData.selectedPages,
+        }),
+      });
+
+      if (!response.ok) {
+        const message = await response.text().catch(() => '');
+        throw new Error(message || `Processing failed with status ${response.status}`);
+      }
+
+      const data = await response.json(); // 202 with job_id + poll_url
+      if (!data?.success || !data?.job_id || !data?.poll_url) {
+        throw new Error(data?.error || 'No job id or poll url returned.');
+      }
+
+      setJobId(data.job_id);
+      setPollUrl(`${window.BACKEND_URL}${data.poll_url}`); // poll_url is like "/process_poll?job_id=..."
+      setIsPolling(true); // polling starts in useEffect below
+    } catch (error) {
+      console.error('Processing error:', error);
+      setPollError(error instanceof Error ? error.message : String(error));
+      setIsProcessing(false);
+      setIsPolling(false);
+      alert('Failed to process document. Please try again.');
     }
+  };
 
-    const data = await response.json();
-    if (!data.success || !data.csv_download_url) {
-      throw new Error(data.error || 'No CSV returned from server.');
-    }
+  useEffect(() => {
+    if (!isPolling || !pollUrl) return;
 
-    // Build absolute URL and fetch the CSV as a blob
-    const absoluteUrl = `${window.BACKEND_URL}${data.csv_download_url}`;
-    const dlResp = await fetch(absoluteUrl);
-    if (!dlResp.ok) throw new Error('CSV download failed.');
-    const blob = await dlResp.blob();
+    let isMounted = true;
+    let intervalId: number | undefined;
 
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = data.csv_filename || 'gpt_responses.csv';
-    document.body.appendChild(link);
-    link.click();
-    URL.revokeObjectURL(link.href);
-    link.remove();
+    const tick = async () => {
+      try {
+        const r = await fetch(pollUrl, { method: 'GET' });
+        if (!r.ok) throw new Error(`Poll failed: ${r.status}`);
+        const json: PollResponse = await r.json();
+        if (!isMounted) return;
+        setPollData(json);
 
-    // Show success modal instead of alert
-    setShowSuccessModal(true);
-  } catch (error) {
-    console.error('Processing error:', error);
-    alert('Failed to process document. Please try again.');
-  }
-};
+        // Stop on terminal states
+        if (json.status === 'completed' || json.status === 'error') {
+          setIsPolling(false);
+          setIsProcessing(false);
+
+          if (json.status === 'completed' && json.csv_download_url) {
+            const absolute = `${window.BACKEND_URL}${json.csv_download_url}`;
+            try {
+              await downloadCsv(absolute, json.csv_filename);
+              setShowSuccessModal(true);
+            } catch (e) {
+              console.error(e);
+              setPollError(e instanceof Error ? e.message : String(e));
+            }
+          } else if (json.status === 'error') {
+            setPollError(json.error || 'Processing failed.');
+          }
+
+          if (intervalId) window.clearInterval(intervalId);
+        }
+      } catch (e) {
+        if (!isMounted) return;
+        setPollError(e instanceof Error ? e.message : String(e));
+        // keep polling; often transient (network) errors
+      }
+    };
+
+    // first immediate poll, then every 3s
+    tick();
+    intervalId = window.setInterval(tick, 3000);
+
+    return () => {
+      isMounted = false;
+      if (intervalId) window.clearInterval(intervalId);
+    };
+  }, [isPolling, pollUrl]);
+
 
 
   const inputStyle = {
@@ -655,7 +750,7 @@ const handleSubmit = async (e: React.FormEvent) => {
       {/* Submit Button */}
       <button
         type="submit"
-        disabled={!fileInfo || formData.selectedPages.length === 0}
+        disabled={!fileInfo || formData.selectedPages.length === 0 || isProcessing}
         style={{
           width: '100%',
           padding: '16px',
@@ -671,8 +766,63 @@ const handleSubmit = async (e: React.FormEvent) => {
           letterSpacing: '1px'
         }}
       >
-        🚀 Process Document
+        🚀 {isProcessing ? 'Your Document is being processed' : 'Process Document'}
       </button>
+
+      {(isProcessing || isPolling) && (
+  <div style={{
+    margin: '24px 0',
+    padding: '16px',
+    borderRadius: '12px',
+    background: colors.primary.white,
+    border: `1px solid ${colors.primary.lightBlue}`,
+    boxShadow: `0 6px 18px ${colors.tertiary.blueGrey}20`
+  }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+      <strong>Processing Status</strong>
+      <span>{pollData?.status ?? 'starting...'}</span>
+    </div>
+
+    {/* Progress bar */}
+      <div style={{ height: 10, background: colors.primary.offWhite, borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
+        <div
+          style={{
+            width: `${percent(pollData)}%`,
+            height: '100%',
+            transition: 'width 300ms ease',
+            background: colors.secondary.green
+          }}
+        />
+      </div>
+
+      <div style={{ fontSize: 14, color: colors.tertiary.blueGrey }}>
+        <div>Pages: {pollData?.pages_done ?? 0} / {pollData?.pages_total ?? formData.selectedPages.length}</div>
+        {pollData?.last_page ? <div>Last processed page: {pollData.last_page}</div> : null}
+        {pollError && <div style={{ color: colors.tertiary.red, marginTop: 6 }}>⚠️ {pollError}</div>}
+      </div>
+
+      {/* Live responses list */}
+      {pollData?.responses?.length ? (
+        <div style={{
+          marginTop: 12,
+          maxHeight: 200,
+          overflowY: 'auto',
+          borderTop: `1px solid ${colors.primary.offWhite}`,
+          paddingTop: 8
+        }}>
+          {pollData.responses.map(r => (
+            <div key={r.page} style={{ marginBottom: 8 }}>
+              <strong>Page {r.page}:</strong>
+              <div style={{ fontSize: 13, color: colors.primary.darkGrey, whiteSpace: 'pre-wrap' }}>
+                {r.gpt_response}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )}
+
 
       {/* Success Modal */}
       <SuccessModal
