@@ -64,8 +64,28 @@ The backend uses a simple file-based storage system with an uploads directory fo
 1. File upload and validation
 2. Format detection and conversion to PDF if needed
 3. Page extraction and preview generation
-4. AI processing with configurable parameters
-5. Result delivery back to frontend
+4. Output location selection (download to browser or save to SharePoint)
+5. AI processing with configurable parameters
+6. Result delivery: browser download or SharePoint upload
+
+### SharePoint Integration (October 2025)
+The application now supports direct output to SharePoint in addition to browser downloads:
+- **Authentication**: Users can authenticate with SharePoint using interactive browser-based authentication
+- **Folder Navigation**: Browse and navigate SharePoint folder structures through a modal interface
+- **Output Selection**: Choose between downloading to browser or saving directly to a SharePoint location
+- **Filename Specification**: Users can specify custom filenames (must end with .csv) for SharePoint uploads
+
+**SharePoint API Endpoints:**
+- `/api/context` - Create SharePoint authentication context
+- `/api/folder/list` - List contents of a SharePoint folder
+- `/api/folder/tree` - Get recursive folder tree structure
+- `/api/search` - Search for files/folders within SharePoint
+- `/api/folder/exists` - Check if a folder exists
+- `/api/file/exists` - Check if a file exists
+
+**Components:**
+- `OutputLocationModal.tsx` - Modal interface for selecting output location and navigating SharePoint folders
+- SharePoint context caching with 5-minute TTL for improved performance
 
 ## External Dependencies
 
@@ -86,6 +106,7 @@ The backend uses a simple file-based storage system with an uploads directory fo
   - pdf2image for PDF to image conversion
 - **Image Processing**: Pillow for image manipulation
 - **System Integration**: LibreOffice (external dependency) for document conversion
+- **SharePoint Integration**: Office365-REST-Python-Client for SharePoint connectivity and file operations
 
 ### System Requirements
 - **LibreOffice**: Required for converting DOCX/PPTX files to PDF format
