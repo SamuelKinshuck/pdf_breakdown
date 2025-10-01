@@ -550,11 +550,14 @@ def _run_process_job(job_id: str,
                      selected_pages: List[int],
                      system_prompt: str,
                      user_prompt: str,
-                     model: str) -> None:
+                     model: str,
+                     output_config: dict = None) -> None:
     """
     Background worker that does the actual page-by-page processing and updates
     the _JOBS[job_id] state so /process_poll can report progress.
     """
+    if output_config is None:
+        output_config = {'outputType': 'browser'}
     # Mark job as running
     _save_job(job_id, {"status": "running", "started_at": _now_iso()})
 
@@ -613,21 +616,60 @@ def _run_process_job(job_id: str,
             })
             return
 
-        # Save final CSV into the upload folder (same naming as before)
+        # Create DataFrame
         df = pd.DataFrame(sorted(rows, key=lambda r: r["page"]), columns=["page", "gpt_response"])
-        timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
-        csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
-        upload_dir = UPLOAD_ROOT / file_id
-        csv_path = upload_dir / csv_filename
-        df.to_csv(str(csv_path), index=False)
+        
+        # Handle output based on output_config
+        if output_config.get('outputType') == 'sharepoint':
+            # Save to SharePoint
+            context_id = output_config.get('contextId')
+            sharepoint_folder = output_config.get('sharepointFolder')
+            filename = output_config.get('filename', 'output.csv')
+            
+            if context_id and sharepoint_folder:
+                try:
+                    ctx = _new_ctx(context_id)
+                    success = sharepoint_export_df_to_csv(ctx, sharepoint_folder, filename, df)
+                    
+                    if success:
+                        _save_job(job_id, {
+                            "status": "completed",
+                            "finished_at": _now_iso(),
+                            "csv_filename": filename,
+                            "csv_download_url": None,
+                        })
+                    else:
+                        raise Exception("Failed to upload to SharePoint")
+                except Exception as sp_error:
+                    print(f"SharePoint upload error: {sp_error}")
+                    _save_job(job_id, {
+                        "status": "error",
+                        "error": f"Failed to save to SharePoint: {sp_error}",
+                        "finished_at": _now_iso(),
+                    })
+                    return
+            else:
+                _save_job(job_id, {
+                    "status": "error",
+                    "error": "Missing SharePoint context or folder",
+                    "finished_at": _now_iso(),
+                })
+                return
+        else:
+            # Save to local filesystem for browser download
+            timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
+            csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
+            upload_dir = UPLOAD_ROOT / file_id
+            csv_path = upload_dir / csv_filename
+            df.to_csv(str(csv_path), index=False)
 
-        # Mark job complete
-        _save_job(job_id, {
-            "status": "completed",
-            "finished_at": _now_iso(),
-            "csv_filename": csv_filename,
-            "csv_download_url": f"/download/{file_id}/{csv_filename}",
-        })
+            # Mark job complete
+            _save_job(job_id, {
+                "status": "completed",
+                "finished_at": _now_iso(),
+                "csv_filename": csv_filename,
+                "csv_download_url": f"/download/{file_id}/{csv_filename}",
+            })
 
     except Exception as e:
         # Capture traceback for debugging
@@ -662,6 +704,7 @@ def process_document():
     model = (data.get('model') or 'gpt-4.1').lower()
     file_id = data.get('file_id', '')
     selected_pages = data.get('selected_pages', [])
+    output_config = data.get('output_config', {'outputType': 'browser'})
 
     # Validate inputs (same constraints as before)
     if not file_id:
@@ -688,12 +731,13 @@ def process_document():
     # Create a job and kick off a worker thread
     job_id = str(uuid.uuid4())
     state = _init_job_state(job_id, file_id, selected_pages, model)
+    state['output_config'] = output_config
     with _JOBS_LOCK:
         _JOBS[job_id] = state  # type: ignore[assignment]
 
     worker = threading.Thread(
         target=_run_process_job,
-        args=(job_id, file_id, selected_pages, system_prompt, user_prompt, model),
+        args=(job_id, file_id, selected_pages, system_prompt, user_prompt, model, output_config),
         daemon=True
     )
     worker.start()

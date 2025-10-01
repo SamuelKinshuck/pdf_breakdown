@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import CollapsibleSection from './CollapsibleSection';
 import SuccessModal from './SuccessModal';
 import CustomDropdown from './CustomDropdown';
+import OutputLocationModal, { OutputConfig } from './OutputLocationModal';
 
 interface FormData {
   role: string;
@@ -87,6 +88,10 @@ const DocumentProcessorForm: React.FC = () => {
   
   // Success modal state
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  
+  // Output location modal state
+  const [showOutputModal, setShowOutputModal] = useState(false);
+  const [outputConfig, setOutputConfig] = useState<OutputConfig>({ outputType: 'browser' });
   
   // Collapsible sections state
   const [promptConfigExpanded, setPromptConfigExpanded] = useState(true);
@@ -237,6 +242,7 @@ const DocumentProcessorForm: React.FC = () => {
           model: formData.model,
           file_id: fileInfo.file_id,
           selected_pages: formData.selectedPages,
+          output_config: outputConfig,
         }),
       });
 
@@ -281,14 +287,18 @@ const DocumentProcessorForm: React.FC = () => {
           setIsPolling(false);
           setIsProcessing(false);
 
-          if (json.status === 'completed' && json.csv_download_url) {
-            const absolute = `${window.BACKEND_URL}${json.csv_download_url}`;
-            try {
-              await downloadCsv(absolute, json.csv_filename);
+          if (json.status === 'completed') {
+            if (outputConfig.outputType === 'browser' && json.csv_download_url) {
+              const absolute = `${window.BACKEND_URL}${json.csv_download_url}`;
+              try {
+                await downloadCsv(absolute, json.csv_filename);
+                setShowSuccessModal(true);
+              } catch (e) {
+                console.error(e);
+                setPollError(e instanceof Error ? e.message : String(e));
+              }
+            } else if (outputConfig.outputType === 'sharepoint') {
               setShowSuccessModal(true);
-            } catch (e) {
-              console.error(e);
-              setPollError(e instanceof Error ? e.message : String(e));
             }
           } else if (json.status === 'error') {
             setPollError(json.error || 'Processing failed.');
@@ -615,34 +625,63 @@ const DocumentProcessorForm: React.FC = () => {
             style={{ display: 'none' }}
             id="file-upload"
           />
-          <label
-            htmlFor="file-upload"
-            style={{
-              display: 'inline-block',
-              padding: '12px 24px',
-              backgroundColor: colors.secondary.seaGreen,
-              color: colors.primary.white,
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontWeight: '600',
-              border: 'none',
-              fontSize: '16px',
-              transition: 'all 0.3s ease',
-              boxShadow: `0 4px 12px ${colors.secondary.seaGreen}40`
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = colors.secondary.green;
-              e.currentTarget.style.transform = 'translateY(-1px)';
-              e.currentTarget.style.boxShadow = `0 6px 16px ${colors.secondary.green}50`;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = colors.secondary.seaGreen;
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = `0 4px 12px ${colors.secondary.seaGreen}40`;
-            }}
-          >
-            {isUploading ? 'Uploading...' : 'Choose File'}
-          </label>
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
+            <label
+              htmlFor="file-upload"
+              style={{
+                display: 'inline-block',
+                padding: '12px 24px',
+                backgroundColor: colors.secondary.seaGreen,
+                color: colors.primary.white,
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: '600',
+                border: 'none',
+                fontSize: '16px',
+                transition: 'all 0.3s ease',
+                boxShadow: `0 4px 12px ${colors.secondary.seaGreen}40`
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = colors.secondary.green;
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = `0 6px 16px ${colors.secondary.green}50`;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = colors.secondary.seaGreen;
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = `0 4px 12px ${colors.secondary.seaGreen}40`;
+              }}
+            >
+              {isUploading ? 'Uploading...' : 'Choose File'}
+            </label>
+            <button
+              onClick={() => setShowOutputModal(true)}
+              style={{
+                padding: '12px 24px',
+                backgroundColor: colors.secondary.lilac,
+                color: colors.primary.white,
+                borderRadius: '8px',
+                cursor: 'pointer',
+                fontWeight: '600',
+                border: 'none',
+                fontSize: '16px',
+                transition: 'all 0.3s ease',
+                boxShadow: `0 4px 12px ${colors.secondary.lilac}40`
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = colors.secondary.darkPurple;
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = `0 6px 16px ${colors.secondary.darkPurple}50`;
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = colors.secondary.lilac;
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = `0 4px 12px ${colors.secondary.lilac}40`;
+              }}
+            >
+              Choose Output Location
+            </button>
+          </div>
           <p style={{ marginTop: '16px', color: colors.tertiary.lightGrey, fontSize: '14px' }}>
             Supports PDF, DOCX, and PPTX files
           </p>
@@ -654,6 +693,30 @@ const DocumentProcessorForm: React.FC = () => {
           {formData.file && (
             <p style={{ color: colors.secondary.seaGreen, marginTop: '8px', fontSize: '14px' }}>
               Selected: {formData.file.name}
+            </p>
+          )}
+          {outputConfig.outputType === 'sharepoint' && outputConfig.sharepointFolder && (
+            <div style={{ 
+              marginTop: '12px', 
+              padding: '12px', 
+              backgroundColor: colors.primary.offWhite,
+              borderRadius: '8px',
+              fontSize: '14px'
+            }}>
+              <div style={{ color: colors.secondary.seaGreen, fontWeight: '600', marginBottom: '4px' }}>
+                📤 Output to SharePoint
+              </div>
+              <div style={{ color: colors.primary.darkGrey, fontSize: '12px' }}>
+                Folder: {outputConfig.sharepointFolder}
+              </div>
+              <div style={{ color: colors.primary.darkGrey, fontSize: '12px' }}>
+                File: {outputConfig.filename}
+              </div>
+            </div>
+          )}
+          {outputConfig.outputType === 'browser' && (
+            <p style={{ marginTop: '8px', color: colors.tertiary.blue, fontSize: '14px' }}>
+              📥 Output: Download to browser
             </p>
           )}
         </div>
@@ -823,6 +886,16 @@ const DocumentProcessorForm: React.FC = () => {
     </div>
   )}
 
+
+      {/* Output Location Modal */}
+      <OutputLocationModal
+        isOpen={showOutputModal}
+        onClose={() => setShowOutputModal(false)}
+        onConfirm={(config) => {
+          setOutputConfig(config);
+          setShowOutputModal(false);
+        }}
+      />
 
       {/* Success Modal */}
       <SuccessModal
