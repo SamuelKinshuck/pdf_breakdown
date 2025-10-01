@@ -37,6 +37,12 @@ from backend.sharepoint import (
     sharepoint_export_df_to_csv,
     sharepoint_delete_file_by_path
 )
+from backend.database import (
+    save_prompt,
+    search_prompts,
+    get_prompt_by_id,
+    delete_prompt
+)
 
 @dataclass
 class ConnectionInfo:
@@ -798,6 +804,91 @@ def process_poll():
 @app.route("/api/ping")
 def ping():
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/prompts/save", methods=["POST"])
+def api_save_prompt():
+    """Save a new prompt configuration."""
+    try:
+        data = request.get_json(force=True)
+        
+        required_fields = ["name", "role", "task", "context", "format", "constraints"]
+        for field in required_fields:
+            if field not in data:
+                return jsonify({"success": False, "error": f"Missing field: {field}"}), 400
+        
+        result = save_prompt(
+            name=data["name"],
+            description=data.get("description", ""),
+            role_prompt=data["role"],
+            task_prompt=data["task"],
+            context_prompt=data["context"],
+            format_prompt=data["format"],
+            constraints_prompt=data["constraints"],
+            created_by=data.get("created_by"),
+            tags=data.get("tags")
+        )
+        
+        if result["success"]:
+            return jsonify(result), 201
+        else:
+            return jsonify(result), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/prompts/search", methods=["GET"])
+def api_search_prompts():
+    """Search for saved prompts."""
+    try:
+        search_text = request.args.get("search_text")
+        search_in = request.args.get("search_in", "both")
+        tags = request.args.get("tags")
+        created_by = request.args.get("created_by")
+        limit = int(request.args.get("limit", 100))
+        
+        result = search_prompts(
+            search_text=search_text,
+            search_in=search_in,
+            tags=tags,
+            created_by=created_by,
+            limit=limit
+        )
+        
+        if result["success"]:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/prompts/<int:prompt_id>", methods=["GET"])
+def api_get_prompt(prompt_id):
+    """Get a specific prompt by ID."""
+    try:
+        result = get_prompt_by_id(prompt_id)
+        
+        if result["success"]:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 404
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/prompts/<int:prompt_id>", methods=["DELETE"])
+def api_delete_prompt(prompt_id):
+    """Delete a prompt by ID."""
+    try:
+        result = delete_prompt(prompt_id)
+        
+        if result["success"]:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 404
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/")

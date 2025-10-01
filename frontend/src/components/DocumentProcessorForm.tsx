@@ -4,6 +4,8 @@ import SuccessModal from './SuccessModal';
 import CustomDropdown from './CustomDropdown';
 import OutputLocationModal, { OutputConfig } from './OutputLocationModal';
 import ProcessingDetailsModal from './ProcessingDetailsModal';
+import SavePromptModal, { SavePromptData } from './SavePromptModal';
+import SearchPromptsModal, { SavedPrompt } from './SearchPromptsModal';
 
 interface FormData {
   role: string;
@@ -97,6 +99,11 @@ const DocumentProcessorForm: React.FC = () => {
   // Processing details modal state
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   
+  // Prompt management modal state
+  const [showSavePromptModal, setShowSavePromptModal] = useState(false);
+  const [showSearchPromptsModal, setShowSearchPromptsModal] = useState(false);
+  const [promptSaveSuccess, setPromptSaveSuccess] = useState<string | null>(null);
+  
   // Collapsible sections state
   const [promptConfigExpanded, setPromptConfigExpanded] = useState(true);
   const [modelConfigExpanded, setModelConfigExpanded] = useState(true);
@@ -189,6 +196,52 @@ const DocumentProcessorForm: React.FC = () => {
 
   const handlePageSelection = (pages: number[]) => {
     setFormData(prev => ({ ...prev, selectedPages: pages }));
+  };
+
+  const handleSavePrompt = async (saveData: SavePromptData) => {
+    try {
+      const response = await fetch(`${window.BACKEND_URL}api/prompts/save`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: saveData.name,
+          description: saveData.description,
+          role: formData.role,
+          task: formData.task,
+          context: formData.context,
+          format: formData.format,
+          constraints: formData.constraints,
+          tags: saveData.tags,
+          created_by: saveData.created_by
+        })
+      });
+
+      const data = await response.json();
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to save prompt');
+      }
+
+      setPromptSaveSuccess(`Prompt "${saveData.name}" saved successfully!`);
+      setTimeout(() => setPromptSaveSuccess(null), 5000);
+    } catch (error: any) {
+      throw new Error(error.message || 'Failed to save prompt');
+    }
+  };
+
+  const handleSelectPrompt = (prompt: SavedPrompt) => {
+    setFormData(prev => ({
+      ...prev,
+      role: prompt.role_prompt || '',
+      task: prompt.task_prompt || '',
+      context: prompt.context_prompt || '',
+      format: prompt.format_prompt || '',
+      constraints: prompt.constraints_prompt || ''
+    }));
+    setPromptSaveSuccess(`Loaded prompt: "${prompt.name}"`);
+    setTimeout(() => setPromptSaveSuccess(null), 5000);
   };
 
   const handleQuickPageSelection = (type: string, pageCount: number) => {
@@ -533,6 +586,93 @@ const DocumentProcessorForm: React.FC = () => {
           />
           <div style={helperTextStyle}>Rules, limitations, or things to avoid</div>
         </CollapsibleSection>
+
+        {/* Prompt Management Buttons */}
+        <div style={{
+          display: 'flex',
+          gap: '12px',
+          marginTop: '20px',
+          flexWrap: 'wrap'
+        }}>
+          <button
+            type="button"
+            onClick={() => setShowSavePromptModal(true)}
+            style={{
+              flex: '1',
+              minWidth: '200px',
+              padding: '14px 24px',
+              backgroundColor: colors.secondary.lilac,
+              color: colors.primary.white,
+              border: 'none',
+              borderRadius: '12px',
+              fontSize: '16px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              boxShadow: `0 4px 12px ${colors.secondary.lilac}40`
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = colors.secondary.darkPurple;
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = `0 6px 16px ${colors.secondary.lilac}50`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = colors.secondary.lilac;
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = `0 4px 12px ${colors.secondary.lilac}40`;
+            }}
+          >
+            💾 Save Prompts
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setShowSearchPromptsModal(true)}
+            style={{
+              flex: '1',
+              minWidth: '200px',
+              padding: '14px 24px',
+              backgroundColor: colors.tertiary.blue,
+              color: colors.primary.white,
+              border: 'none',
+              borderRadius: '12px',
+              fontSize: '16px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              boxShadow: `0 4px 12px ${colors.tertiary.blue}40`
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = colors.tertiary.blueGrey;
+              e.currentTarget.style.transform = 'translateY(-2px)';
+              e.currentTarget.style.boxShadow = `0 6px 16px ${colors.tertiary.blue}50`;
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = colors.tertiary.blue;
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = `0 4px 12px ${colors.tertiary.blue}40`;
+            }}
+          >
+            🔍 Search Saved Prompts
+          </button>
+        </div>
+
+        {/* Success Message */}
+        {promptSaveSuccess && (
+          <div style={{
+            marginTop: '16px',
+            padding: '12px 16px',
+            backgroundColor: `${colors.secondary.green}20`,
+            color: colors.secondary.seaGreen,
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: '600',
+            border: `2px solid ${colors.secondary.green}`,
+            animation: 'fadeIn 0.3s ease'
+          }}>
+            ✓ {promptSaveSuccess}
+          </div>
+        )}
       </CollapsibleSection>
 
       {/* Model Configuration Section */}
@@ -950,6 +1090,27 @@ const DocumentProcessorForm: React.FC = () => {
         onClose={() => setShowDetailsModal(false)}
         pollData={pollData}
         pollError={pollError}
+      />
+
+      {/* Save Prompt Modal */}
+      <SavePromptModal
+        isOpen={showSavePromptModal}
+        onClose={() => setShowSavePromptModal(false)}
+        onSave={handleSavePrompt}
+        promptData={{
+          role: formData.role,
+          task: formData.task,
+          context: formData.context,
+          format: formData.format,
+          constraints: formData.constraints
+        }}
+      />
+
+      {/* Search Prompts Modal */}
+      <SearchPromptsModal
+        isOpen={showSearchPromptsModal}
+        onClose={() => setShowSearchPromptsModal(false)}
+        onSelectPrompt={handleSelectPrompt}
       />
     </form>
   );
