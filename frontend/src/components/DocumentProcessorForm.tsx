@@ -3,6 +3,7 @@ import CollapsibleSection from './CollapsibleSection';
 import SuccessModal from './SuccessModal';
 import CustomDropdown from './CustomDropdown';
 import OutputLocationModal, { OutputConfig } from './OutputLocationModal';
+import ProcessingDetailsModal from './ProcessingDetailsModal';
 
 interface FormData {
   role: string;
@@ -92,6 +93,9 @@ const DocumentProcessorForm: React.FC = () => {
   // Output location modal state
   const [showOutputModal, setShowOutputModal] = useState(false);
   const [outputConfig, setOutputConfig] = useState<OutputConfig>({ outputType: 'browser' });
+  
+  // Processing details modal state
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
   
   // Collapsible sections state
   const [promptConfigExpanded, setPromptConfigExpanded] = useState(true);
@@ -841,48 +845,84 @@ const DocumentProcessorForm: React.FC = () => {
     border: `1px solid ${colors.primary.lightBlue}`,
     boxShadow: `0 6px 18px ${colors.tertiary.blueGrey}20`
   }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
       <strong>Processing Status</strong>
-      <span>{pollData?.status ?? 'starting...'}</span>
+      <span style={{ 
+        fontSize: '14px', 
+        fontWeight: '600',
+        color: pollData?.status === 'completed' 
+          ? colors.secondary.green 
+          : pollData?.status === 'error'
+          ? colors.tertiary.red
+          : colors.tertiary.blue,
+        textTransform: 'capitalize'
+      }}>
+        {pollData?.status ?? 'starting...'}
+      </span>
     </div>
 
     {/* Progress bar */}
-      <div style={{ height: 10, background: colors.primary.offWhite, borderRadius: 6, overflow: 'hidden', marginBottom: 8 }}>
+      <div style={{ height: 10, background: colors.primary.offWhite, borderRadius: 6, overflow: 'hidden', marginBottom: 12 }}>
         <div
           style={{
             width: `${percent(pollData)}%`,
             height: '100%',
             transition: 'width 300ms ease',
-            background: colors.secondary.green
+            background: `linear-gradient(90deg, ${colors.secondary.seaGreen}, ${colors.secondary.green})`
           }}
         />
       </div>
 
-      <div style={{ fontSize: 14, color: colors.tertiary.blueGrey }}>
-        <div>Pages: {pollData?.pages_done ?? 0} / {pollData?.pages_total ?? formData.selectedPages.length}</div>
-        {pollData?.last_page ? <div>Last processed page: {pollData.last_page}</div> : null}
-        {pollError && <div style={{ color: colors.tertiary.red, marginTop: 6 }}>⚠️ {pollError}</div>}
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'space-between', 
+        alignItems: 'center',
+        fontSize: 14, 
+        color: colors.tertiary.blueGrey 
+      }}>
+        <div>
+          <strong>{percent(pollData)}%</strong> - Pages: {pollData?.pages_done ?? 0} / {pollData?.pages_total ?? formData.selectedPages.length}
+        </div>
+        <button
+          type="button"
+          onClick={() => setShowDetailsModal(true)}
+          style={{
+            padding: '8px 16px',
+            backgroundColor: colors.secondary.seaGreen,
+            color: colors.primary.white,
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: '600',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            boxShadow: `0 2px 8px ${colors.secondary.seaGreen}40`
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.backgroundColor = colors.secondary.green;
+            e.currentTarget.style.transform = 'translateY(-1px)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.backgroundColor = colors.secondary.seaGreen;
+            e.currentTarget.style.transform = 'translateY(0)';
+          }}
+        >
+          View Details
+        </button>
       </div>
 
-      {/* Live responses list */}
-      {pollData?.responses?.length ? (
-        <div style={{
+      {pollError && (
+        <div style={{ 
+          color: colors.tertiary.red, 
           marginTop: 12,
-          maxHeight: 200,
-          overflowY: 'auto',
-          borderTop: `1px solid ${colors.primary.offWhite}`,
-          paddingTop: 8
+          padding: '8px 12px',
+          backgroundColor: `${colors.tertiary.red}15`,
+          borderRadius: '6px',
+          fontSize: '13px'
         }}>
-          {pollData.responses.map(r => (
-            <div key={r.page} style={{ marginBottom: 8 }}>
-              <strong>Page {r.page}:</strong>
-              <div style={{ fontSize: 13, color: colors.primary.darkGrey, whiteSpace: 'pre-wrap' }}>
-                {r.gpt_response}
-              </div>
-            </div>
-          ))}
+          ⚠️ {pollError}
         </div>
-      ) : null}
+      )}
     </div>
   )}
 
@@ -902,6 +942,14 @@ const DocumentProcessorForm: React.FC = () => {
         isOpen={showSuccessModal}
         onClose={() => setShowSuccessModal(false)}
         message="Your document has been successfully processed and the CSV file has been downloaded!"
+      />
+
+      {/* Processing Details Modal */}
+      <ProcessingDetailsModal
+        isOpen={showDetailsModal}
+        onClose={() => setShowDetailsModal(false)}
+        pollData={pollData}
+        pollError={pollError}
       />
     </form>
   );
