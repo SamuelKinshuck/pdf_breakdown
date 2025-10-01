@@ -8,15 +8,21 @@ from typing import List
 endpoint = "https://oaigad.openai.azure.com/"
 model_name = "gpt-4.1"
 deployment = "gpt-4.1"
-subscription_key = os.getenv("NEW_OPENAI_API_KEY")
+subscription_key = os.getenv("OPENAI_API_KEY")
 
 api_version = "2024-12-01-preview"
 
-client = AzureOpenAI(
-    api_version=api_version,
-    azure_endpoint=endpoint,
-    api_key=subscription_key,
-)
+# Initialize client only if API key is available
+client = None
+if subscription_key:
+    try:
+        client = AzureOpenAI(
+            api_version=api_version,
+            azure_endpoint=endpoint,
+            api_key=subscription_key,
+        )
+    except Exception as e:
+        print(f"Warning: Failed to initialize Azure OpenAI client: {e}")
 
 # Function to get a response from ChatGPT with a simple system and user prompt
 def get_response_from_chatgpt_simple(system_prompt: str, user_prompt: str, model: str) -> str:

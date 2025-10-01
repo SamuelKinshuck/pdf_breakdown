@@ -27,7 +27,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cd backend && python app.py"
+args = "PYTHONPATH=/home/runner/workspace:$PYTHONPATH python backend/app.py"
 waitForPort = 8000
 
 [[workflows.workflow]]
@@ -51,9 +51,9 @@ localPort = 8000
 externalPort = 8000
 
 [[ports]]
-localPort = 34221
+localPort = 39825
 externalPort = 3000
 
 [nix]
 channel = "stable-25_05"
-packages = ["libreoffice", "poppler_utils"]
+packages = ["freetype", "glibcLocales", "gumbo", "harfbuzz", "jbig2dec", "lcms2", "libimagequant", "libjpeg", "libjpeg_turbo", "libreoffice", "libtiff", "libwebp", "libxcrypt", "mupdf", "openjpeg", "poppler_utils", "swig", "tcl", "tk", "xcbuild", "zlib"]

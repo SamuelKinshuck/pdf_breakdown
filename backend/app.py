@@ -762,13 +762,18 @@ def root():
 
 
 try:
-    if str(BASE_DIR).find('stgadfileshare001') == -1:
-        print('local')
-        HOST = 'localhost'
-        PORT = 4005
-    else:
+    if os.getenv('REPL_ID') or os.getenv('REPLIT_DEV_DOMAIN'):
+        print('Running in Replit environment')
+        HOST = '0.0.0.0'
+        PORT = 8000
+    elif str(BASE_DIR).find('stgadfileshare001') != -1:
+        print('Running in stgadfileshare001 environment')
         HOST = '0.0.0.0'
         PORT = 8316
+    else:
+        print('Running in local environment')
+        HOST = 'localhost'
+        PORT = 4005
 except Exception as e:
     print(f'error: {e}')
     HOST = 'localhost'
