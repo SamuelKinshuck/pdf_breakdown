@@ -98,6 +98,40 @@ The application features an improved progress display system for document proces
   - Error details if any issues occur
 - The modal follows the app's design system with consistent styling and animations
 
+### Prompt Management System (October 2025)
+The application includes a comprehensive prompt save and search system allowing users to store and reuse prompt configurations:
+
+**Features:**
+- **Save Prompts**: Users can save all five prompt sections (Role, Task, Context, Format, Constraints) with a single click
+  - Unique naming requirement prevents duplicates
+  - Optional metadata: description, tags, creator name
+  - Confirmation feedback on successful save
+- **Search Prompts**: Advanced search interface with multiple filters
+  - Search by text in prompt name, body, or both
+  - Filter by tags and creator
+  - Results displayed in concise cards showing key information
+  - Usage statistics tracked (use count, last used date)
+- **Detailed View Modal**: Click to see full prompt details before applying
+- **One-Click Load**: Select any saved prompt to instantly populate all form fields
+
+**Database Implementation:**
+- SQLite database stored in `./data/prompts.db`
+- WAL (Write-Ahead Logging) mode for better concurrency
+- Retry logic for database locking scenarios
+- Context managers for safe connection handling
+- Automatic table creation and schema management
+
+**API Endpoints:**
+- `POST /api/prompts/save` - Save new prompt configuration
+- `GET /api/prompts/search` - Search prompts with filters
+- `GET /api/prompts/<id>` - Retrieve specific prompt (increments use count)
+- `DELETE /api/prompts/<id>` - Delete a saved prompt
+
+**Components:**
+- `SavePromptModal.tsx` - Modal for saving prompts with metadata
+- `SearchPromptsModal.tsx` - Search interface with filters and results display
+- Database module: `backend/database.py` - Robust SQLite operations layer
+
 ## External Dependencies
 
 ### Frontend Dependencies
@@ -110,6 +144,7 @@ The application features an improved progress display system for document proces
 
 ### Backend Dependencies
 - **Web Framework**: Flask with CORS support
+- **Database**: SQLite3 for prompt storage and management
 - **Document Processing**: 
   - PyPDF2 for PDF manipulation
   - python-docx for Word document processing
