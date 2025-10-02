@@ -36,7 +36,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
   const [filename, setFilename] = useState<string>('output.csv');
   const [isLoadingFolder, setIsLoadingFolder] = useState(false);
   const [siteUrl, setSiteUrl] = useState<string>('https://tris42.sharepoint.com/sites/GADOpportunitiesandSolutions');
-  const [rootFolder, setRootFolder] = useState<string>('/sites/GADOpportunitiesandSolutions/Shared Documents');
+  const [rootFolder, setRootFolder] = useState<string>('/sites/GADOpportunitiesandSolutions');
 
   const colors = {
     primary: {
