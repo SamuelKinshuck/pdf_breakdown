@@ -29,6 +29,7 @@ from backend.gpt_interface import get_response_from_chatgpt_image
 import uuid
 from typing import List, Dict
 import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 from dataclasses import dataclass
 import time
@@ -65,8 +66,11 @@ _CTX_CACHE_LOCK = threading.Lock()
 CTX_TTL_SECONDS = 300
 
 
-_JOBS: Dict[str, JobState] = {}
+_JOBS: Dict[str, dict] = {}
 _JOBS_LOCK = threading.Lock()
+
+EXECUTOR = ThreadPoolExecutor(max_workers=4)
+PER_PAGE_TIMEOUT_SECS = 90
 
 
 # -----------------------------------------------------------------------------
@@ -171,14 +175,24 @@ def _images_from_df_path(pdf_path: str,
                          selected_pages: List[int]) -> Dict[int, str]:
     doc = fitz.open(pdf_path)
     page_images_for_gpt = {}
-    for page_num, page in enumerate(list(doc)):
-        if (page_num + 1) not in selected_pages:
+    MAX_DIM = 1600
+    for page_num in range(len(doc)):
+        page_number = page_num + 1
+        if page_number not in selected_pages:
             continue
-        pix = page.get_pixmap(dpi=150)
-        img_bytes = pix.tobytes("png")
-        base64_encoded = base64.b64encode(img_bytes).decode('utf-8')
-        data_url = f"data:image/png;base64,{base64_encoded}"
-        page_images_for_gpt[page_num + 1] = data_url
+        try:
+            page = doc[page_num]
+            rect = page.rect
+            scale = min(MAX_DIM / max(rect.width, rect.height), 2)
+            m = fitz.Matrix(scale, scale)
+            pix = page.get_pixmap(matrix=m, alpha=False)
+            img_bytes = pix.tobytes("jpeg", quality=75)
+            base64_encoded = base64.b64encode(img_bytes).decode('utf-8')
+            data_url = f"data:image/jpeg;base64,{base64_encoded}"
+            page_images_for_gpt[page_number] = data_url
+        except Exception as e:
+            print(f"Error rasterizing page {page_number}: {e}")
+            page_images_for_gpt[page_number] = None
     return page_images_for_gpt
 
 
@@ -555,6 +569,8 @@ def _save_job(job_id: str, update: dict):
         job = _JOBS.get(job_id)
         if job is None:
             return
+        if job.get("status") in ("completed", "error") and update.get("status") not in ("completed", "error"):
+            return
         job.update(update)
         job["updated_at"] = _now_iso()
 
@@ -581,20 +597,27 @@ def _run_process_job(job_id: str,
 
         pages_in_order = sorted([p for p in selected_pages if p in images_for_gpt])
 
-        rows: List[Dict[str, str]] = []
+        rows: List[Dict[str, Any]] = []
         for idx, page_no in enumerate(pages_in_order, start=1):
+            # Mark page as in progress
+            _save_job(job_id, {
+                "pages_done": idx - 1,
+                "last_page": page_no,
+                "page_status": {"page": page_no, "state": "in_progress"}
+            })
+            
             pre_compiled_image = images_for_gpt.get(page_no)
             if pre_compiled_image is None:
-                # Should not happen, but keep moving
                 rows.append({"page": page_no, "gpt_response": "Page image not available"})
                 _save_job(job_id, {
                     "pages_done": idx,
                     "last_page": page_no,
                     "rows": sorted(rows, key=lambda r: r["page"]),
+                    "page_status": {"page": page_no, "state": "completed"}
                 })
                 continue
 
-            # Do the GPT call
+            # Do the GPT call with timeout
             if os.getenv('OPENAI_API_KEY') is None:
                 response = 'No API key found'
             else:
@@ -604,12 +627,16 @@ def _run_process_job(job_id: str,
                         user_prompt=user_prompt,
                         image_path=None,
                         model=model,
-                        pre_compiled_image=pre_compiled_image
+                        pre_compiled_image=pre_compiled_image,
+                        timeout=PER_PAGE_TIMEOUT_SECS
                     )
                 except BadRequestError:
                     response = 'GPT refused to process this page'
-                except Exception:
-                    response = 'Unable to get a response from GPT for this page'
+                except Exception as e:
+                    if 'timeout' in str(e).lower() or 'timed out' in str(e).lower():
+                        response = 'Timed out contacting GPT for this page'
+                    else:
+                        response = f'Unable to get a response from GPT for this page: {e}'
 
             rows.append({"page": page_no, "gpt_response": response})
 
@@ -618,6 +645,7 @@ def _run_process_job(job_id: str,
                 "pages_done": idx,
                 "last_page": page_no,
                 "rows": sorted(rows, key=lambda r: r["page"]),
+                "page_status": {"page": page_no, "state": "completed"}
             })
 
         # If nothing processed, mark and bail
@@ -640,9 +668,13 @@ def _run_process_job(job_id: str,
             filename = output_config.get('filename', 'output.csv')
             
             if context_id and sharepoint_folder:
-                try:
+                def _upload_to_sharepoint():
                     ctx = _new_ctx(context_id)
-                    success = sharepoint_export_df_to_csv(ctx, sharepoint_folder, filename, df)
+                    return sharepoint_export_df_to_csv(ctx, sharepoint_folder, filename, df)
+                
+                try:
+                    future = EXECUTOR.submit(_upload_to_sharepoint)
+                    success = future.result(timeout=60)
                     
                     if success:
                         _save_job(job_id, {
@@ -653,6 +685,21 @@ def _run_process_job(job_id: str,
                         })
                     else:
                         raise Exception("Failed to upload to SharePoint")
+                except FuturesTimeout:
+                    print("SharePoint upload timed out, falling back to browser output")
+                    timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
+                    csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
+                    upload_dir = UPLOAD_ROOT / file_id
+                    csv_path = upload_dir / csv_filename
+                    df.to_csv(str(csv_path), index=False)
+                    _save_job(job_id, {
+                        "status": "completed",
+                        "finished_at": _now_iso(),
+                        "csv_filename": csv_filename,
+                        "csv_download_url": f"/download/{file_id}/{csv_filename}",
+                        "error": "SharePoint upload timed out, saved locally instead"
+                    })
+                    return
                 except Exception as sp_error:
                     print(f"SharePoint upload error: {sp_error}")
                     _save_job(job_id, {
@@ -785,6 +832,19 @@ def process_poll():
         # shallow copy whole dict + rows list for a stable snapshot
         snap = dict(state)
         snap_rows = list(snap.get("rows", []))
+    
+    # Check for stalled jobs
+    STALE_SECS = 180
+    if snap.get('status') == 'running':
+        try:
+            from datetime import timezone
+            last = datetime.strptime(snap['updated_at'], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - last).total_seconds() > STALE_SECS:
+                _save_job(snap['job_id'], {"status": "error", "error": "Worker stalled - no progress for 3 minutes"})
+                snap['status'] = 'error'
+                snap['error'] = 'Worker stalled - no progress for 3 minutes'
+        except Exception:
+            pass
 
     rows_ordered = sorted(snap_rows, key=lambda r: r.get("page", 0))
     payload = {
@@ -800,6 +860,7 @@ def process_poll():
         'pages_total': snap.get('pages_total'),
         'pages_done': snap.get('pages_done'),
         'last_page': snap.get('last_page'),
+        'page_status': snap.get('page_status'),
         'responses': rows_ordered,
         'csv_filename': snap.get('csv_filename'),
         'csv_download_url': snap.get('csv_download_url'),

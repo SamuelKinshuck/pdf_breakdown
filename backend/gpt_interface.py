@@ -73,7 +73,7 @@ def local_image_to_data_url(image_path: str) -> str:
     # Construct the data URL
     return f"data:{mime_type};base64,{base64_encoded_data}"
 
-def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_path: str, model: str, pre_compiled_image = None) -> str:
+def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_path: str, model: str, pre_compiled_image = None, timeout: float = None) -> str:
     if client is None:
         return "API key not available"
     
@@ -81,20 +81,26 @@ def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_
         image_data_url = pre_compiled_image
     else:
         image_data_url = local_image_to_data_url(image_path)
-    response = client.chat.completions.create(
-        model=model, # This needs to be a vision enabled model
-        messages=[
-            {"role": "system", "content": system_prompt},  # System prompt that guides the model's behavior
+    
+    create_params = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": user_prompt}, # User input to which the model will respond
+                    {"type": "text", "text": user_prompt},
                     {"type": "image_url", "image_url": {"url" : image_data_url}}
                 ]
             }
         ],
-        temperature=0  # Setting temperature to 0 makes responses more deterministic
-    )
+        "temperature": 0
+    }
+    
+    if timeout is not None:
+        create_params["timeout"] = timeout
+    
+    response = client.chat.completions.create(**create_params)
     return response.choices[0].message.content
 
 
