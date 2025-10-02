@@ -131,7 +131,7 @@ const SavePromptModal: React.FC<SavePromptModalProps> = ({ isOpen, onClose, onSa
           Save Prompt Configuration
         </h2>
 
-        <form onSubmit={handleSubmit}>
+        <div>
           <div style={{ marginBottom: '20px' }}>
             <label style={{
               display: 'block',
@@ -145,6 +145,12 @@ const SavePromptModal: React.FC<SavePromptModalProps> = ({ isOpen, onClose, onSa
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSubmit(e);
+                }
+              }}
               placeholder="Enter a unique name for this prompt"
               style={{
                 width: '100%',
@@ -288,7 +294,8 @@ const SavePromptModal: React.FC<SavePromptModalProps> = ({ isOpen, onClose, onSa
               Cancel
             </button>
             <button
-              type="submit"
+              type="button"
+              onClick={handleSubmit}
               disabled={isSaving}
               style={{
                 padding: '12px 24px',
@@ -312,7 +319,7 @@ const SavePromptModal: React.FC<SavePromptModalProps> = ({ isOpen, onClose, onSa
               {isSaving ? 'Saving...' : 'Save Prompt'}
             </button>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );
