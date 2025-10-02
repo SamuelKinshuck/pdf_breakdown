@@ -5,6 +5,14 @@ import PyPDF2
 from docx import Document
 from pptx import Presentation
 
+import sys
+from pathlib import Path
+
+# Add the project root (one level up from this file) to sys.path
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
+sys.path.append(str(PROJECT_ROOT))
+
 import shutil
 import subprocess
 
@@ -19,7 +27,6 @@ from PyPDF2 import PdfReader
 from backend.gpt_interface import get_response_from_chatgpt_image
 
 import uuid
-from pathlib import Path
 from typing import List, Dict
 import threading
 
