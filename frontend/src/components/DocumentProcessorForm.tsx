@@ -6,6 +6,7 @@ import OutputLocationModal, { OutputConfig } from './OutputLocationModal';
 import ProcessingDetailsModal from './ProcessingDetailsModal';
 import SavePromptModal, { SavePromptData } from './SavePromptModal';
 import SearchPromptsModal, { SavedPrompt } from './SearchPromptsModal';
+import { BACKEND_URL } from '../apiConfig';
 
 interface FormData {
   role: string;
@@ -163,7 +164,7 @@ const DocumentProcessorForm: React.FC = () => {
 
     try {
       console.log('contacting endpoint');
-      const response = await fetch(window.BACKEND_URL + 'upload', {
+      const response = await fetch(BACKEND_URL + 'upload', {
         method: 'POST',
         body: formDataToSend, // Don't set Content-Type; the browser adds the boundary.
       });
@@ -200,7 +201,7 @@ const DocumentProcessorForm: React.FC = () => {
 
   const handleSavePrompt = async (saveData: SavePromptData) => {
     try {
-      const response = await fetch(`${window.BACKEND_URL}api/prompts/save`, {
+      const response = await fetch(`${BACKEND_URL}api/prompts/save`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -286,7 +287,7 @@ const DocumentProcessorForm: React.FC = () => {
       setJobId(null);
       setPollUrl(null);
 
-      const response = await fetch(`${window.BACKEND_URL}/process`, {
+      const response = await fetch(`${BACKEND_URL}/process`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -314,7 +315,7 @@ const DocumentProcessorForm: React.FC = () => {
       }
 
       setJobId(data.job_id);
-      setPollUrl(`${window.BACKEND_URL}${data.poll_url}`); // poll_url is like "/process_poll?job_id=..."
+      setPollUrl(`${BACKEND_URL}${data.poll_url}`); // poll_url is like "/process_poll?job_id=..."
       setIsPolling(true); // polling starts in useEffect below
     } catch (error) {
       console.error('Processing error:', error);
@@ -346,7 +347,7 @@ const DocumentProcessorForm: React.FC = () => {
 
           if (json.status === 'completed') {
             if (outputConfig.outputType === 'browser' && json.csv_download_url) {
-              const absolute = `${window.BACKEND_URL}${json.csv_download_url}`;
+              const absolute = `${BACKEND_URL}${json.csv_download_url}`;
               try {
                 await downloadCsv(absolute, json.csv_filename);
                 setShowSuccessModal(true);

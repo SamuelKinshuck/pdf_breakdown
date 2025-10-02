@@ -907,12 +907,12 @@ try:
         PORT = 8316
     else:
         print('Running in local environment')
-        HOST = 'localhost'
-        PORT = 4005
+        HOST = '0.0.0.0'
+        PORT = 8000
 except Exception as e:
     print(f'error: {e}')
-    HOST = 'localhost'
-    PORT = 4005
+    HOST = '0.0.0.0'
+    PORT = 8000
 
 
 if __name__ == '__main__':

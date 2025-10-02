@@ -11,19 +11,29 @@ Preferred communication style: Simple, everyday language.
 ## System Architecture
 
 ### Environment Configuration
-The application supports multiple deployment environments with automatic detection:
+The application supports multiple deployment environments with automatic detection and a centralized configuration system:
 
-**Replit Environment:**
-- Backend: Runs on `0.0.0.0:8000` (detected via `REPL_ID` or `REPLIT_DEV_DOMAIN` env vars)
-- Frontend: Served by Flask from the backend (same-origin setup)
-- Backend URL: Uses `window.location.origin` for API calls
-- PYTHONPATH: Set to `/home/runner/workspace` for proper module imports
+**API Configuration Module (`frontend/src/apiConfig.ts`):**
+- Single source of truth for backend URL detection across all components
+- Eliminates reliance on window.BACKEND_URL which can be undefined during certain startup flows
+- Provides consistent environment detection with multiple fallback layers:
+  1. REACT_APP_API_BASE environment variable (highest priority)
+  2. window.BACKEND_URL from public/config.js
+  3. Automatic detection based on window.location
+  4. Same-origin fallback for production builds served by Flask
 
-**Local Development Environment:**
-- Backend: Runs on `localhost:4005`
-- Frontend: Can run separately on port 3000 or served by Flask
-- Backend URL: `http://localhost:4005/`
-- Detected by `localhost` in window URL
+**Development Mode (npm run start):**
+- Backend: Runs on `0.0.0.0:8000` for both local and Replit environments
+- Frontend: Runs on port 5000 via CRA dev server with hot reloading
+- Proxy: package.json configured with `"proxy": "http://localhost:8000"` to forward API requests during development
+- Backend URL: Automatically detected as `http://localhost:8000/` (local) or `:8000` port on Replit domain
+- PYTHONPATH: Set to `/home/runner/workspace` for proper module imports in Replit
+
+**Production Mode (npm run build + Flask):**
+- Backend: Serves React build from `../frontend/build` on port 8000
+- Frontend: Static files served by Flask at same-origin
+- Backend URL: Uses relative paths (same-origin)
+- Deployment: Backend and frontend on same domain/port for simplified CORS
 
 **stgadfileshare001 Environment:**
 - Backend: Runs on `0.0.0.0:8316`
@@ -34,11 +44,15 @@ The application supports multiple deployment environments with automatic detecti
 - **Framework**: React 19 with TypeScript for type safety and modern development
 - **Styling**: Tailwind CSS for utility-first styling with custom color scheme
 - **Forms**: React Hook Form for efficient form state management and validation
-- **HTTP Client**: Axios for API communication with the backend
+- **HTTP Client**: Axios for API requests (with native fetch for new prompt features)
 - **Build Tool**: Create React App for development and build pipeline
-- **Configuration**: Dynamic backend URL detection via `config.js` based on environment
+- **Configuration**: 
+  - Centralized API configuration via `src/apiConfig.ts` module
+  - CRA development proxy pointing to `http://localhost:8000`
+  - Fallback config.js in public folder for backwards compatibility
+  - Environment variable support via REACT_APP_API_BASE
 
-The frontend follows a component-based architecture with a main DocumentProcessorForm component handling file uploads and AI processing configuration. The UI uses a custom color scheme with dark grey primary colors and light blue accents.
+The frontend follows a component-based architecture with a main DocumentProcessorForm component handling file uploads and AI processing configuration. All components import `BACKEND_URL` from the centralized apiConfig module rather than relying on window globals, ensuring consistent API communication across all deployment scenarios. The UI uses a custom color scheme with dark grey primary colors and light blue accents.
 
 ### Backend Architecture
 - **Framework**: Flask as a lightweight web framework for Python

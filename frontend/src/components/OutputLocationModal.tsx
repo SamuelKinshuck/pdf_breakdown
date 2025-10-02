@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { BACKEND_URL } from '../apiConfig';
 
 interface OutputLocationModalProps {
   isOpen: boolean;
@@ -77,7 +78,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
     setIsAuthenticating(true);
     setAuthError(null);
     try {
-      const response = await fetch(`${window.BACKEND_URL}/api/context`, {
+      const response = await fetch(`${BACKEND_URL}/api/context`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -112,7 +113,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
     setIsLoadingFolder(true);
     try {
       const response = await fetch(
-        `${window.BACKEND_URL}/api/folder/list?context_id=${ctx}&folder=${encodeURIComponent(folderPath)}`
+        `${BACKEND_URL}/api/folder/list?context_id=${ctx}&folder=${encodeURIComponent(folderPath)}`
       );
       
       const data = await response.json();
