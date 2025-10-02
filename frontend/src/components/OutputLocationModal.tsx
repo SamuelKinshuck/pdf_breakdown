@@ -290,6 +290,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
           </label>
           <div style={{ display: 'flex', gap: '16px' }}>
             <button
+              type="button"
               onClick={() => setOutputType('browser')}
               style={{
                 flex: 1,
@@ -312,6 +313,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
               Download to Browser
             </button>
             <button
+              type="button"
               onClick={() => setOutputType('sharepoint')}
               style={{
                 flex: 1,
@@ -403,6 +405,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
                 />
               </div>
               <button
+                type="button"
                 onClick={handleCreateContext}
                 disabled={isAuthenticating || !isSharePointMode}
                 style={{
@@ -469,6 +472,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
                   </div>
                   {folderHistory.length > 0 && (
                     <button
+                      type="button"
                       onClick={navigateBack}
                       disabled={!isSharePointMode}
                       style={{
@@ -668,6 +672,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
         {/* Action Buttons */}
         <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
           <button
+            type="button"
             onClick={onClose}
             style={{
               flex: 1,
@@ -689,6 +694,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
             Cancel
           </button>
           <button
+            type="button"
             onClick={handleConfirm}
             disabled={outputType === 'sharepoint' && (!contextId || !filename.endsWith('.csv'))}
             style={{
