@@ -157,8 +157,12 @@ def save_prompt(
 def search_prompts(
     search_text: Optional[str] = None,
     search_in: str = "both",
+    search_fields: Optional[List[str]] = None,
     tags: Optional[str] = None,
     created_by: Optional[str] = None,
+    date_operator: Optional[str] = None,
+    date_value: Optional[str] = None,
+    date_value_end: Optional[str] = None,
     limit: int = 100
 ) -> Dict[str, Any]:
     """
@@ -166,9 +170,13 @@ def search_prompts(
     
     Args:
         search_text: Text to search for
-        search_in: Where to search - 'name', 'body', or 'both'
+        search_in: Where to search - 'name', 'body', or 'both' (legacy, overridden by search_fields)
+        search_fields: List of specific fields to search in (e.g., ['name', 'description', 'role_prompt'])
         tags: Filter by tags (comma-separated)
         created_by: Filter by creator
+        date_operator: Date comparison operator - 'before', 'after', 'on', 'between'
+        date_value: Date to compare against (format: YYYY-MM-DD)
+        date_value_end: End date for 'between' operator (format: YYYY-MM-DD)
         limit: Maximum number of results
     
     Returns:
@@ -185,28 +193,51 @@ def search_prompts(
                 
                 if search_text:
                     search_pattern = f"%{search_text}%"
-                    if search_in == "name":
-                        query += " AND name LIKE ?"
-                        params.append(search_pattern)
-                    elif search_in == "body":
-                        query += """ AND (
-                            role_prompt LIKE ? OR 
-                            task_prompt LIKE ? OR 
-                            context_prompt LIKE ? OR 
-                            format_prompt LIKE ? OR 
-                            constraints_prompt LIKE ?
-                        )"""
-                        params.extend([search_pattern] * 5)
+                    
+                    if search_fields and len(search_fields) > 0:
+                        field_mapping = {
+                            'name': 'name',
+                            'description': 'description',
+                            'role': 'role_prompt',
+                            'task': 'task_prompt',
+                            'context': 'context_prompt',
+                            'format': 'format_prompt',
+                            'constraints': 'constraints_prompt',
+                            'tags': 'tags'
+                        }
+                        
+                        valid_fields = []
+                        for field in search_fields:
+                            if field in field_mapping:
+                                valid_fields.append(field_mapping[field])
+                        
+                        if valid_fields:
+                            conditions = " OR ".join([f"{field} LIKE ?" for field in valid_fields])
+                            query += f" AND ({conditions})"
+                            params.extend([search_pattern] * len(valid_fields))
                     else:
-                        query += """ AND (
-                            name LIKE ? OR
-                            role_prompt LIKE ? OR 
-                            task_prompt LIKE ? OR 
-                            context_prompt LIKE ? OR 
-                            format_prompt LIKE ? OR 
-                            constraints_prompt LIKE ?
-                        )"""
-                        params.extend([search_pattern] * 6)
+                        if search_in == "name":
+                            query += " AND name LIKE ?"
+                            params.append(search_pattern)
+                        elif search_in == "body":
+                            query += """ AND (
+                                role_prompt LIKE ? OR 
+                                task_prompt LIKE ? OR 
+                                context_prompt LIKE ? OR 
+                                format_prompt LIKE ? OR 
+                                constraints_prompt LIKE ?
+                            )"""
+                            params.extend([search_pattern] * 5)
+                        else:
+                            query += """ AND (
+                                name LIKE ? OR
+                                role_prompt LIKE ? OR 
+                                task_prompt LIKE ? OR 
+                                context_prompt LIKE ? OR 
+                                format_prompt LIKE ? OR 
+                                constraints_prompt LIKE ?
+                            )"""
+                            params.extend([search_pattern] * 6)
                 
                 if tags:
                     query += " AND tags LIKE ?"
@@ -215,6 +246,20 @@ def search_prompts(
                 if created_by:
                     query += " AND created_by = ?"
                     params.append(created_by)
+                
+                if date_operator and date_value:
+                    if date_operator == "before":
+                        query += " AND DATE(created_at) < DATE(?)"
+                        params.append(date_value)
+                    elif date_operator == "after":
+                        query += " AND DATE(created_at) > DATE(?)"
+                        params.append(date_value)
+                    elif date_operator == "on":
+                        query += " AND DATE(created_at) = DATE(?)"
+                        params.append(date_value)
+                    elif date_operator == "between" and date_value_end:
+                        query += " AND DATE(created_at) BETWEEN DATE(?) AND DATE(?)"
+                        params.extend([date_value, date_value_end])
                 
                 query += " ORDER BY created_at DESC LIMIT ?"
                 params.append(limit)

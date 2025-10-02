@@ -25,9 +25,12 @@ export interface SavedPrompt {
 
 const SearchPromptsModal: React.FC<SearchPromptsModalProps> = ({ isOpen, onClose, onSelectPrompt }) => {
   const [searchText, setSearchText] = useState('');
-  const [searchIn, setSearchIn] = useState<'name' | 'body' | 'both'>('both');
+  const [searchFields, setSearchFields] = useState<string[]>(['name', 'description', 'role', 'task', 'context', 'format', 'constraints', 'tags']);
   const [tags, setTags] = useState('');
   const [createdBy, setCreatedBy] = useState('');
+  const [dateOperator, setDateOperator] = useState<'before' | 'after' | 'on' | 'between' | ''>('');
+  const [dateValue, setDateValue] = useState('');
+  const [dateValueEnd, setDateValueEnd] = useState('');
   const [results, setResults] = useState<SavedPrompt[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [error, setError] = useState('');
@@ -71,9 +74,21 @@ const SearchPromptsModal: React.FC<SearchPromptsModalProps> = ({ isOpen, onClose
     try {
       const params = new URLSearchParams();
       if (searchText) params.append('search_text', searchText);
-      params.append('search_in', searchIn);
+      
+      if (searchFields.length > 0) {
+        params.append('search_fields', searchFields.join(','));
+      }
+      
       if (tags) params.append('tags', tags);
       if (createdBy) params.append('created_by', createdBy);
+      
+      if (dateOperator && dateValue) {
+        params.append('date_operator', dateOperator);
+        params.append('date_value', dateValue);
+        if (dateOperator === 'between' && dateValueEnd) {
+          params.append('date_value_end', dateValueEnd);
+        }
+      }
 
       const response = await fetch(`${BACKEND_URL}api/prompts/search?${params.toString()}`);
       const data = await response.json();
@@ -88,6 +103,14 @@ const SearchPromptsModal: React.FC<SearchPromptsModalProps> = ({ isOpen, onClose
     } finally {
       setIsSearching(false);
     }
+  };
+
+  const toggleSearchField = (field: string) => {
+    setSearchFields(prev => 
+      prev.includes(field) 
+        ? prev.filter(f => f !== field)
+        : [...prev, field]
+    );
   };
 
   const handleSelectPrompt = async (prompt: SavedPrompt) => {
@@ -167,66 +190,83 @@ const SearchPromptsModal: React.FC<SearchPromptsModalProps> = ({ isOpen, onClose
             marginBottom: '24px',
             border: `2px solid ${colors.primary.lightBlue}`
           }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
-              <div>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  color: colors.primary.darkGrey,
-                  fontWeight: '600',
-                  fontSize: '14px'
-                }}>
-                  Search Text
-                </label>
-                <input
-                  type="text"
-                  value={searchText}
-                  onChange={(e) => setSearchText(e.target.value)}
-                  placeholder="Enter search term..."
-                  onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: `2px solid ${colors.primary.lightBlue}`,
-                    fontSize: '14px',
-                    outline: 'none',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                color: colors.primary.darkGrey,
+                fontWeight: '600',
+                fontSize: '14px'
+              }}>
+                Search Text
+              </label>
+              <input
+                type="text"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="Enter search term..."
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                style={{
+                  width: '100%',
+                  padding: '10px',
+                  borderRadius: '8px',
+                  border: `2px solid ${colors.primary.lightBlue}`,
+                  fontSize: '14px',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
 
-              <div>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  color: colors.primary.darkGrey,
-                  fontWeight: '600',
-                  fontSize: '14px'
-                }}>
-                  Search In
-                </label>
-                <select
-                  value={searchIn}
-                  onChange={(e) => setSearchIn(e.target.value as 'name' | 'body' | 'both')}
-                  style={{
-                    width: '100%',
-                    padding: '10px',
-                    borderRadius: '8px',
-                    border: `2px solid ${colors.primary.lightBlue}`,
-                    fontSize: '14px',
-                    outline: 'none',
-                    backgroundColor: colors.primary.white,
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                color: colors.primary.darkGrey,
+                fontWeight: '600',
+                fontSize: '14px'
+              }}>
+                Search In Fields
+              </label>
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(4, 1fr)', 
+                gap: '8px',
+                padding: '12px',
+                backgroundColor: colors.primary.offWhite,
+                borderRadius: '8px'
+              }}>
+                {[
+                  { value: 'name', label: 'Name' },
+                  { value: 'description', label: 'Description' },
+                  { value: 'role', label: 'Role' },
+                  { value: 'task', label: 'Task' },
+                  { value: 'context', label: 'Context' },
+                  { value: 'format', label: 'Format' },
+                  { value: 'constraints', label: 'Constraints' },
+                  { value: 'tags', label: 'Tags' }
+                ].map(({ value, label }) => (
+                  <label key={value} style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
                     cursor: 'pointer',
-                    boxSizing: 'border-box'
-                  }}
-                >
-                  <option value="both">Name & Body</option>
-                  <option value="name">Name Only</option>
-                  <option value="body">Body Only</option>
-                </select>
+                    fontSize: '13px',
+                    color: colors.primary.darkGrey
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={searchFields.includes(value)}
+                      onChange={() => toggleSearchField(value)}
+                      style={{ cursor: 'pointer' }}
+                    />
+                    {label}
+                  </label>
+                ))}
               </div>
+            </div>
 
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
               <div>
                 <label style={{
                   display: 'block',
@@ -279,6 +319,74 @@ const SearchPromptsModal: React.FC<SearchPromptsModalProps> = ({ isOpen, onClose
                     boxSizing: 'border-box'
                   }}
                 />
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{
+                display: 'block',
+                marginBottom: '8px',
+                color: colors.primary.darkGrey,
+                fontWeight: '600',
+                fontSize: '14px'
+              }}>
+                Filter by Date
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 1fr', gap: '8px' }}>
+                <select
+                  value={dateOperator}
+                  onChange={(e) => setDateOperator(e.target.value as any)}
+                  style={{
+                    padding: '10px',
+                    borderRadius: '8px',
+                    border: `2px solid ${colors.primary.lightBlue}`,
+                    fontSize: '14px',
+                    outline: 'none',
+                    backgroundColor: colors.primary.white,
+                    cursor: 'pointer',
+                    boxSizing: 'border-box'
+                  }}
+                >
+                  <option value="">None</option>
+                  <option value="before">Before</option>
+                  <option value="after">After</option>
+                  <option value="on">On</option>
+                  <option value="between">Between</option>
+                </select>
+                
+                <input
+                  type="date"
+                  value={dateValue}
+                  onChange={(e) => setDateValue(e.target.value)}
+                  disabled={!dateOperator}
+                  style={{
+                    padding: '10px',
+                    borderRadius: '8px',
+                    border: `2px solid ${colors.primary.lightBlue}`,
+                    fontSize: '14px',
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    backgroundColor: dateOperator ? colors.primary.white : colors.primary.offWhite,
+                    cursor: dateOperator ? 'pointer' : 'not-allowed'
+                  }}
+                />
+                
+                {dateOperator === 'between' && (
+                  <input
+                    type="date"
+                    value={dateValueEnd}
+                    onChange={(e) => setDateValueEnd(e.target.value)}
+                    placeholder="End date"
+                    style={{
+                      padding: '10px',
+                      borderRadius: '8px',
+                      border: `2px solid ${colors.primary.lightBlue}`,
+                      fontSize: '14px',
+                      outline: 'none',
+                      boxSizing: 'border-box'
+                    }}
+                  />
+                )}
               </div>
             </div>
 

@@ -847,11 +847,22 @@ def api_search_prompts():
         created_by = request.args.get("created_by")
         limit = int(request.args.get("limit", 100))
         
+        search_fields_str = request.args.get("search_fields")
+        search_fields = search_fields_str.split(",") if search_fields_str else None
+        
+        date_operator = request.args.get("date_operator")
+        date_value = request.args.get("date_value")
+        date_value_end = request.args.get("date_value_end")
+        
         result = search_prompts(
             search_text=search_text,
             search_in=search_in,
+            search_fields=search_fields,
             tags=tags,
             created_by=created_by,
+            date_operator=date_operator,
+            date_value=date_value,
+            date_value_end=date_value_end,
             limit=limit
         )
         
