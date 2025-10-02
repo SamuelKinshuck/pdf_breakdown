@@ -50,10 +50,6 @@ externalPort = 80
 localPort = 8000
 externalPort = 8000
 
-[[ports]]
-localPort = 36081
-externalPort = 3000
-
 [nix]
 channel = "stable-25_05"
 packages = ["freetype", "glibcLocales", "gumbo", "harfbuzz", "jbig2dec", "lcms2", "libimagequant", "libjpeg", "libjpeg_turbo", "libreoffice", "libtiff", "libwebp", "libxcrypt", "mupdf", "openjpeg", "poppler_utils", "swig", "tcl", "tk", "xcbuild", "zlib"]
