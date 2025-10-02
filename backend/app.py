@@ -173,6 +173,9 @@ UPLOAD_ROOT = BASE_DIR / 'uploads'
 
 def _images_from_df_path(pdf_path: str,
                          selected_pages: List[int]) -> Dict[int, str]:
+    from PIL import Image
+    import io
+    
     doc = fitz.open(pdf_path)
     page_images_for_gpt = {}
     MAX_DIM = 1600
@@ -186,7 +189,15 @@ def _images_from_df_path(pdf_path: str,
             scale = min(MAX_DIM / max(rect.width, rect.height), 2)
             m = fitz.Matrix(scale, scale)
             pix = page.get_pixmap(matrix=m, alpha=False)
-            img_bytes = pix.tobytes("jpeg", quality=75)
+            
+            # Convert to PIL Image for JPEG compression with quality control
+            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+            
+            # Save as JPEG with quality setting
+            buffer = io.BytesIO()
+            img.save(buffer, format="JPEG", quality=75, optimize=True)
+            img_bytes = buffer.getvalue()
+            
             base64_encoded = base64.b64encode(img_bytes).decode('utf-8')
             data_url = f"data:image/jpeg;base64,{base64_encoded}"
             page_images_for_gpt[page_number] = data_url
