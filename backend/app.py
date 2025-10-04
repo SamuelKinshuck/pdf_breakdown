@@ -72,7 +72,8 @@ CTX_TTL_SECONDS = 300
 _JOBS: Dict[str, dict] = {}
 _JOBS_LOCK = threading.Lock()
 
-EXECUTOR = ThreadPoolExecutor(max_workers=4)
+# Increased from 4 to 8 to handle more concurrent operations (image generation + SharePoint uploads)
+EXECUTOR = ThreadPoolExecutor(max_workers=8)
 PER_PAGE_TIMEOUT_SECS = 90
 
 
@@ -179,35 +180,46 @@ def _images_from_df_path(pdf_path: str,
     from PIL import Image
     import io
     
-    doc = fitz.open(pdf_path)
-    page_images_for_gpt = {}
-    MAX_DIM = 1600
-    for page_num in range(len(doc)):
-        page_number = page_num + 1
-        if page_number not in selected_pages:
-            continue
-        try:
-            page = doc[page_num]
-            rect = page.rect
-            scale = min(MAX_DIM / max(rect.width, rect.height), 2)
-            m = fitz.Matrix(scale, scale)
-            pix = page.get_pixmap(matrix=m, alpha=False)
-            
-            # Convert to PIL Image for JPEG compression with quality control
-            img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            
-            # Save as JPEG with quality setting
-            buffer = io.BytesIO()
-            img.save(buffer, format="JPEG", quality=75, optimize=True)
-            img_bytes = buffer.getvalue()
-            
-            base64_encoded = base64.b64encode(img_bytes).decode('utf-8')
-            data_url = f"data:image/jpeg;base64,{base64_encoded}"
-            page_images_for_gpt[page_number] = data_url
-        except Exception as e:
-            print(f"Error rasterizing page {page_number}: {e}")
-            page_images_for_gpt[page_number] = None
-    return page_images_for_gpt
+    print(f"[_images_from_df_path] Starting image generation for {len(selected_pages)} pages from {pdf_path}")
+    doc = None
+    try:
+        doc = fitz.open(pdf_path)
+        page_images_for_gpt = {}
+        MAX_DIM = 1600
+        for page_num in range(len(doc)):
+            page_number = page_num + 1
+            if page_number not in selected_pages:
+                continue
+            try:
+                print(f"[_images_from_df_path] Rendering page {page_number}...")
+                page = doc[page_num]
+                rect = page.rect
+                scale = min(MAX_DIM / max(rect.width, rect.height), 2)
+                m = fitz.Matrix(scale, scale)
+                pix = page.get_pixmap(matrix=m, alpha=False)
+                
+                # Convert to PIL Image for JPEG compression with quality control
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                
+                # Save as JPEG with quality setting
+                buffer = io.BytesIO()
+                img.save(buffer, format="JPEG", quality=75, optimize=True)
+                img_bytes = buffer.getvalue()
+                
+                base64_encoded = base64.b64encode(img_bytes).decode('utf-8')
+                data_url = f"data:image/jpeg;base64,{base64_encoded}"
+                page_images_for_gpt[page_number] = data_url
+                print(f"[_images_from_df_path] Page {page_number} rendered successfully ({len(base64_encoded)} bytes)")
+            except Exception as e:
+                print(f"[_images_from_df_path] Error rasterizing page {page_number}: {e}")
+                page_images_for_gpt[page_number] = None
+        print(f"[_images_from_df_path] Completed image generation for {len(page_images_for_gpt)} pages")
+        return page_images_for_gpt
+    finally:
+        # Always close the PDF document to avoid file handle leaks
+        if doc is not None:
+            doc.close()
+            print(f"[_images_from_df_path] PDF document closed")
 
 
 def _pdf_path_for_file_id(file_id: str) -> str:
@@ -601,18 +613,42 @@ def _run_process_job(job_id: str,
     """
     if output_config is None:
         output_config = {'outputType': 'browser'}
+    
+    print(f"[_run_process_job] Job {job_id} started for file {file_id}")
     # Mark job as running
     _save_job(job_id, {"status": "running", "started_at": _now_iso()})
 
     try:
         # Resolve PDF + prep images in the worker (keeps main request snappy)
+        print(f"[_run_process_job] Resolving PDF path for file {file_id}")
         pdf_path = _pdf_path_for_file_id(file_id)
-        images_for_gpt = _images_from_df_path(pdf_path, selected_pages)
+        print(f"[_run_process_job] PDF path resolved: {pdf_path}")
+        
+        # Use ThreadPoolExecutor to run image generation with timeout
+        print(f"[_run_process_job] Starting image generation with timeout...")
+        def _generate_images():
+            return _images_from_df_path(pdf_path, selected_pages)
+        
+        future = EXECUTOR.submit(_generate_images)
+        try:
+            # 5 minute timeout for image generation (generous for large PDFs)
+            images_for_gpt = future.result(timeout=300)
+            print(f"[_run_process_job] Image generation completed successfully")
+        except FuturesTimeout:
+            print(f"[_run_process_job] Image generation timed out after 300 seconds")
+            _save_job(job_id, {
+                "status": "error",
+                "error": "PDF image generation timed out. The PDF may be too large or corrupted.",
+                "finished_at": _now_iso()
+            })
+            return
 
         pages_in_order = sorted([p for p in selected_pages if p in images_for_gpt])
+        print(f"[_run_process_job] Processing {len(pages_in_order)} pages in order: {pages_in_order}")
 
         rows: List[Dict[str, Any]] = []
         for idx, page_no in enumerate(pages_in_order, start=1):
+            print(f"[_run_process_job] Starting page {page_no} ({idx}/{len(pages_in_order)})")
             # Mark page as in progress
             _save_job(job_id, {
                 "pages_done": idx - 1,
@@ -622,6 +658,7 @@ def _run_process_job(job_id: str,
             
             pre_compiled_image = images_for_gpt.get(page_no)
             if pre_compiled_image is None:
+                print(f"[_run_process_job] Page {page_no}: No image available")
                 rows.append({"page": page_no, "gpt_response": "Page image not available"})
                 _save_job(job_id, {
                     "pages_done": idx,
@@ -633,9 +670,11 @@ def _run_process_job(job_id: str,
 
             # Do the GPT call with timeout
             if os.getenv('OPENAI_API_KEY') is None:
+                print(f"[_run_process_job] Page {page_no}: No API key found")
                 response = 'No API key found'
             else:
                 try:
+                    print(f"[_run_process_job] Page {page_no}: Calling GPT API (timeout: {PER_PAGE_TIMEOUT_SECS}s)...")
                     response = get_response_from_chatgpt_image(
                         system_prompt=system_prompt,
                         user_prompt=user_prompt,
@@ -644,12 +683,16 @@ def _run_process_job(job_id: str,
                         pre_compiled_image=pre_compiled_image,
                         timeout=PER_PAGE_TIMEOUT_SECS
                     )
+                    print(f"[_run_process_job] Page {page_no}: GPT API call successful")
                 except BadRequestError:
+                    print(f"[_run_process_job] Page {page_no}: GPT refused to process")
                     response = 'GPT refused to process this page'
                 except Exception as e:
                     if 'timeout' in str(e).lower() or 'timed out' in str(e).lower():
+                        print(f"[_run_process_job] Page {page_no}: GPT API timeout")
                         response = 'Timed out contacting GPT for this page'
                     else:
+                        print(f"[_run_process_job] Page {page_no}: GPT API error: {e}")
                         response = f'Unable to get a response from GPT for this page: {e}'
 
             rows.append({"page": page_no, "gpt_response": response})
@@ -661,9 +704,11 @@ def _run_process_job(job_id: str,
                 "rows": sorted(rows, key=lambda r: r["page"]),
                 "page_status": {"page": page_no, "state": "completed"}
             })
+            print(f"[_run_process_job] Page {page_no} completed ({idx}/{len(pages_in_order)})")
 
         # If nothing processed, mark and bail
         if not rows:
+            print(f"[_run_process_job] No rows processed, marking as error")
             _save_job(job_id, {
                 "status": "error",
                 "error": "Could not find selected pages to process.",
@@ -672,10 +717,12 @@ def _run_process_job(job_id: str,
             return
 
         # Create DataFrame
+        print(f"[_run_process_job] Creating DataFrame with {len(rows)} rows")
         df = pd.DataFrame(sorted(rows, key=lambda r: r["page"]), columns=["page", "gpt_response"])
         
         # Handle output based on output_config
         if output_config.get('outputType') == 'sharepoint':
+            print(f"[_run_process_job] Saving to SharePoint")
             # Save to SharePoint
             context_id = output_config.get('contextId')
             sharepoint_folder = output_config.get('sharepointFolder')
@@ -731,11 +778,13 @@ def _run_process_job(job_id: str,
                 return
         else:
             # Save to local filesystem for browser download
+            print(f"[_run_process_job] Saving to local filesystem")
             timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
             csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
             upload_dir = UPLOAD_ROOT / file_id
             csv_path = upload_dir / csv_filename
             df.to_csv(str(csv_path), index=False)
+            print(f"[_run_process_job] CSV saved to {csv_path}")
 
             # Mark job complete
             _save_job(job_id, {
@@ -744,6 +793,7 @@ def _run_process_job(job_id: str,
                 "csv_filename": csv_filename,
                 "csv_download_url": f"/download/{file_id}/{csv_filename}",
             })
+            print(f"[_run_process_job] Job {job_id} completed successfully")
 
     except Exception as e:
         # Capture traceback for debugging
@@ -766,8 +816,8 @@ def _run_process_job(job_id: str,
 def process_document():
     data = request.get_json()
     print('*' * 80)
-    print('data in /process')
-    print(data)
+    print('[/process] Received new processing request')
+    print(f'[/process] Data: {data}')
 
     # Extract the same form data as before
     role = data.get('role', '')
@@ -804,10 +854,12 @@ def process_document():
 
     # Create a job and kick off a worker thread
     job_id = str(uuid.uuid4())
+    print(f'[/process] Created job {job_id} for file {file_id}')
     state = _init_job_state(job_id, file_id, selected_pages, model)
     state['output_config'] = output_config
     with _JOBS_LOCK:
         _JOBS[job_id] = state  # type: ignore[assignment]
+        print(f'[/process] Active jobs: {len(_JOBS)}')
 
     worker = threading.Thread(
         target=_run_process_job,
@@ -815,6 +867,7 @@ def process_document():
         daemon=True
     )
     worker.start()
+    print(f'[/process] Worker thread started for job {job_id}')
 
     # Immediate response so the client can poll for status and partial results
     return jsonify({
