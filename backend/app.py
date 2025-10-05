@@ -28,8 +28,7 @@ import base64
 from datetime import datetime
 from PyPDF2 import PdfReader
 from backend.gpt_interface import (
-    get_response_from_chatgpt_image,
-    get_response_from_chatgpt_image_and_functions,
+    get_response_from_chatgpt_multiple_image_and_functions,
     get_markdown_schema
 )
 
@@ -180,6 +179,8 @@ except NameError:
 UPLOAD_ROOT = BASE_DIR / 'uploads'
 
 
+
+
 def _ensure_image_size(img_path: Path,
                        max_bytes: int = 10 * 1024 * 1024,
                        min_quality: int = 30,
@@ -220,6 +221,22 @@ def _ensure_image_size(img_path: Path,
     # If we get here the file is still > max_bytes but we've done our best.
     return img_path
 
+import tempfile
+def pdf_pages_to_images(pdf_path: Path, selected_pages: List, dpi: int = 200) -> List[Path]:
+    doc = fitz.open(pdf_path)
+    scale = dpi / 72
+    mtx = fitz.Matrix(scale, scale)
+    tmp = Path(tempfile.mkdtemp(prefix=f"{pdf_path.stem}_"))
+    paths: List[Path] = []
+    for i, page in enumerate(doc):
+        if (i + 1) in selected_pages:
+            pix = page.get_pixmap(matrix=mtx)
+            out = tmp / f"page_{i:04d}.png"
+            pix.save(out)
+            _ensure_image_size(out)
+            paths.append(out)
+    doc.close()
+    return paths
 
 def _images_from_df_path(pdf_path: str,
                          selected_pages: List[int]) -> Dict[int, str]:
@@ -785,6 +802,7 @@ def process_page():
         pdf_path = _pdf_path_for_file_id(file_id)
         
         # Generate image for this specific page
+        img_paths = pdf_pages_to_images(pdf_path, selected_pages)
         images_for_gpt = _images_from_df_path(pdf_path, [page_number])
         pre_compiled_image = images_for_gpt.get(page_number)
         
@@ -805,14 +823,14 @@ def process_page():
                     import json
                     print(f'[/process_page] Page {page_number}: Calling GPT API with function calling')
                     
-                    raw_response = get_response_from_chatgpt_image_and_functions(
+                    raw_response = get_response_from_chatgpt_multiple_image_and_functions(
                         system_prompt=system_prompt,
                         user_prompt=user_prompt,
-                        image_path=None,
+                        image_paths=img_paths,
                         model=model,
                         functions=get_markdown_schema(),
                         function_name='provide_markdown_response',
-                        pre_compiled_image=pre_compiled_image
+                        pre_compiled_image=None
                     )
                     
                     print(f'[/process_page] Page {page_number}: GPT API call successful, parsing response')
