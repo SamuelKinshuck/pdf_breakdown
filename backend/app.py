@@ -659,7 +659,7 @@ def _run_process_job(job_id: str,
             pre_compiled_image = images_for_gpt.get(page_no)
             if pre_compiled_image is None:
                 print(f"[_run_process_job] Page {page_no}: No image available")
-                rows.append({"page": page_no, "gpt_response": "Page image not available"})
+                rows.append({"page": page_no, "gpt_response": "Page image not available", "image_size_bytes": 0})
                 _save_job(job_id, {
                     "pages_done": idx,
                     "last_page": page_no,
@@ -667,6 +667,10 @@ def _run_process_job(job_id: str,
                     "page_status": {"page": page_no, "state": "completed"}
                 })
                 continue
+
+            # Calculate the size of the image data being sent to GPT
+            image_size_bytes = len(pre_compiled_image)
+            print(f"[_run_process_job] Page {page_no}: Image size = {image_size_bytes:,} bytes ({image_size_bytes / 1024:.2f} KB)")
 
             # Do the GPT call with timeout
             if os.getenv('OPENAI_API_KEY') is None:
@@ -695,7 +699,7 @@ def _run_process_job(job_id: str,
                         print(f"[_run_process_job] Page {page_no}: GPT API error: {e}")
                         response = f'Unable to get a response from GPT for this page: {e}'
 
-            rows.append({"page": page_no, "gpt_response": response})
+            rows.append({"page": page_no, "gpt_response": response, "image_size_bytes": image_size_bytes})
 
             # Update incremental progress
             _save_job(job_id, {

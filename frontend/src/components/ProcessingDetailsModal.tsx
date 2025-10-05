@@ -3,6 +3,7 @@ import React from 'react';
 interface ProcessingResponse {
   page: number;
   gpt_response: string;
+  image_size_bytes?: number;
 }
 
 interface PollData {
@@ -261,23 +262,38 @@ const ProcessingDetailsModal: React.FC<ProcessingDetailsModalProps> = ({
                     marginBottom: '8px',
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'space-between',
                     gap: '8px'
                   }}>
-                    <span style={{
-                      width: '24px',
-                      height: '24px',
-                      borderRadius: '50%',
-                      backgroundColor: colors.secondary.seaGreen,
-                      color: colors.primary.white,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      fontSize: '12px',
-                      fontWeight: '700'
-                    }}>
-                      {r.page}
-                    </span>
-                    Page {r.page}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{
+                        width: '24px',
+                        height: '24px',
+                        borderRadius: '50%',
+                        backgroundColor: colors.secondary.seaGreen,
+                        color: colors.primary.white,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '12px',
+                        fontWeight: '700'
+                      }}>
+                        {r.page}
+                      </span>
+                      Page {r.page}
+                    </div>
+                    {r.image_size_bytes !== undefined && r.image_size_bytes > 0 && (
+                      <div style={{ 
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        color: colors.tertiary.blueGrey,
+                        backgroundColor: colors.primary.offWhite,
+                        padding: '4px 8px',
+                        borderRadius: '4px'
+                      }}>
+                        Image: {(r.image_size_bytes / 1024).toFixed(2)} KB
+                      </div>
+                    )}
                   </div>
                   <div style={{ 
                     fontSize: '14px', 

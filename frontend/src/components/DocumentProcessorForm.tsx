@@ -41,7 +41,7 @@ interface PollResponse {
   pages_total: number;
   pages_done: number;
   last_page?: number | null;
-  responses: { page: number; gpt_response: string }[];
+  responses: { page: number; gpt_response: string; image_size_bytes?: number }[];
   csv_filename?: string | null;
   csv_download_url?: string | null;
 }
