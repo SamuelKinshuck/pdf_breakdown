@@ -3,6 +3,7 @@ import os  # Import the OS module to access environment variables
 from mimetypes import guess_type
 import base64
 from typing import List
+import httpx
 
 # Initialize the AzureOpenAI client with the necessary details
 endpoint = "https://oaigad.openai.azure.com/"
@@ -17,9 +18,13 @@ client = None
 if subscription_key:
     try:
         client = AzureOpenAI(
-            api_version=api_version,
-            azure_endpoint=endpoint,
             api_key=subscription_key,
+            azure_endpoint=endpoint,
+            api_version=api_version,
+            # Separate connect/read/write timeouts so uploads & long generations don’t trip:
+            timeout=httpx.Timeout(connect=10.0, read=180.0, write=180.0, pool=10.0),
+            max_retries=1,  # optional: keep this low for vision posts
+            http_client=httpx.Client(http2=False)  # optional: avoids flaky corporate proxies
         )
     except Exception as e:
         print(f"Warning: Failed to initialize Azure OpenAI client: {e}")
@@ -73,7 +78,7 @@ def local_image_to_data_url(image_path: str) -> str:
     # Construct the data URL
     return f"data:{mime_type};base64,{base64_encoded_data}"
 
-def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_path: str, model: str, pre_compiled_image = None, timeout: float = None) -> str:
+def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_path: str, model: str, pre_compiled_image = None) -> str:
     if client is None:
         return "API key not available"
     
@@ -96,9 +101,6 @@ def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_
         ],
         "temperature": 0
     }
-    
-    if timeout is not None:
-        create_params["timeout"] = timeout
     
     response = client.chat.completions.create(**create_params)
     return response.choices[0].message.content

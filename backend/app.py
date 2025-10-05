@@ -74,7 +74,7 @@ _JOBS_LOCK = threading.Lock()
 
 # Increased from 4 to 8 to handle more concurrent operations (image generation + SharePoint uploads)
 EXECUTOR = ThreadPoolExecutor(max_workers=8)
-PER_PAGE_TIMEOUT_SECS = 10
+OPENAI_CONCURRENCY = threading.BoundedSemaphore(3)
 
 
 # -----------------------------------------------------------------------------
@@ -674,15 +674,15 @@ def _run_process_job(job_id: str,
                 response = 'No API key found'
             else:
                 try:
-                    print(f"[_run_process_job] Page {page_no}: Calling GPT API (timeout: {PER_PAGE_TIMEOUT_SECS}s)...")
-                    response = get_response_from_chatgpt_image(
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        image_path=None,
-                        model=model,
-                        pre_compiled_image=pre_compiled_image,
-                        timeout=PER_PAGE_TIMEOUT_SECS
-                    )
+                    print(f"[_run_process_job] Page {page_no}: Calling GPT API ")
+                    with OPENAI_CONCURRENCY:
+                        response = get_response_from_chatgpt_image(
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            image_path=None,
+                            model=model,
+                            pre_compiled_image=pre_compiled_image
+                        )
                     print(f"[_run_process_job] Page {page_no}: GPT API call successful")
                 except BadRequestError:
                     print(f"[_run_process_job] Page {page_no}: GPT refused to process")
