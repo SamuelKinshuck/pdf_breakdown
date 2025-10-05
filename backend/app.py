@@ -74,7 +74,7 @@ _JOBS_LOCK = threading.Lock()
 
 # Increased from 4 to 8 to handle more concurrent operations (image generation + SharePoint uploads)
 EXECUTOR = ThreadPoolExecutor(max_workers=8)
-PER_PAGE_TIMEOUT_SECS = 90
+PER_PAGE_TIMEOUT_SECS = 10
 
 
 # -----------------------------------------------------------------------------
