@@ -37,7 +37,6 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 from dataclasses import dataclass
 import time
 from typing import Any
-from backend.jobstate import JobState
 import traceback
 
 # ---- Import your existing utilities -----------------------------------------

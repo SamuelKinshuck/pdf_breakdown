@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import CollapsibleSection from './CollapsibleSection';
 import SuccessModal from './SuccessModal';
 import CustomDropdown from './CustomDropdown';
@@ -27,24 +27,6 @@ interface FileUploadResponse {
   file_id: string;
 }
 
-// --- add near your other interfaces ---
-interface PollResponse {
-  success: boolean;
-  job_id: string;
-  file_id: string;
-  status: 'queued' | 'running' | 'completed' | 'error' | string;
-  error?: string | null;
-  created_at?: string;
-  updated_at?: string;
-  started_at?: string | null;
-  finished_at?: string | null;
-  pages_total: number;
-  pages_done: number;
-  last_page?: number | null;
-  responses: { page: number; gpt_response: string; image_size_bytes?: number }[];
-  csv_filename?: string | null;
-  csv_download_url?: string | null;
-}
 const DocumentProcessorForm: React.FC = () => {
   const [formData, setFormData] = useState<FormData>({
     role: '',
@@ -64,11 +46,9 @@ const DocumentProcessorForm: React.FC = () => {
   const [uploadError, setUploadError] = useState<string>('');
 
   // Processing state
-  const [jobId, setJobId] = useState<string | null>(null);
   const [processedPages, setProcessedPages] = useState<{ page: number; gpt_response: string; image_size_bytes?: number }[]>([]);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [totalPages, setTotalPages] = useState<number>(0);
-  const [selectedPagesToProcess, setSelectedPagesToProcess] = useState<number[]>([]);
 
   const percent = () => {
     if (!totalPages) return 0;
@@ -301,9 +281,7 @@ const DocumentProcessorForm: React.FC = () => {
       setIsProcessing(true);
       setProcessingError(null);
       setProcessedPages([]);
-      setJobId(null);
       setTotalPages(formData.selectedPages.length);
-      setSelectedPagesToProcess(formData.selectedPages);
 
       const response = await fetch(`${BACKEND_URL}/process`, {
         method: 'POST',
@@ -331,8 +309,6 @@ const DocumentProcessorForm: React.FC = () => {
       if (!data?.success || !data?.job_id) {
         throw new Error(data?.error || 'No job id returned.');
       }
-
-      setJobId(data.job_id);
 
       const sortedPages = [...formData.selectedPages].sort((a, b) => a - b);
       
