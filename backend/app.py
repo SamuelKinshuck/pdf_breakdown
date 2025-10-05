@@ -221,68 +221,71 @@ def _images_from_df_path(pdf_path: str,
                          selected_pages: List[int]) -> Dict[int, str]:
     from PIL import Image
     import tempfile
-    from mimetypes import guess_type
-    
+    from pathlib import Path
+    import base64
+
     print(f"[_images_from_df_path] Starting image generation for {len(selected_pages)} pages from {pdf_path}")
     doc = None
     temp_dir = None
     try:
         doc = fitz.open(pdf_path)
-        
-        # Create temporary directory for PNG files (like in the reference code)
+
+        # Validate pages (1-indexed input)
+        max_page = len(doc)
+        pages_to_render = []
+        for p in selected_pages:
+            if 1 <= p <= max_page:
+                pages_to_render.append(p)
+            else:
+                print(f"[_images_from_df_path] Skipping out-of-range page: {p} (valid 1..{max_page})")
+
+        # Create temporary directory for images
         temp_dir = Path(tempfile.mkdtemp(prefix=f"{Path(pdf_path).stem}_"))
-        
-        # Use DPI-based scaling (default 72 DPI in reference code, we'll use similar approach)
-        dpi = 72  # Can be adjusted as needed
+
+        # DPI-based scaling (keep your original)
+        dpi = 72
         scale = dpi / 72
         mtx = fitz.Matrix(scale, scale)
-        
-        page_images_for_gpt = {}
-        
-        for page_num in range(len(doc)):
-            page_number = page_num + 1
-            if page_number not in selected_pages:
-                continue
+
+        page_images_for_gpt: Dict[int, str] = {}
+
+        for page_number in pages_to_render:
             try:
                 print(f"[_images_from_df_path] Rendering page {page_number}...")
-                page = doc[page_num]
-                
-                # Get pixmap with matrix scaling
+                page = doc[page_number - 1]
                 pix = page.get_pixmap(matrix=mtx)
-                
-                # Save as PNG first (as in reference code)
-                png_path = temp_dir / f"page_{page_num:04d}.png"
+
+                # 1) Write a PNG first (fast path from PyMuPDF)
+                png_path = temp_dir / f"page_{page_number:04d}.png"
                 pix.save(str(png_path))
-                
-                # Apply ensure_image_size compression (iterative quality/resolution reduction)
-                _ensure_image_size(png_path)
-                
-                # Guess the MIME type of the image based on the file extension
-                mime_type, _ = guess_type(str(png_path))
-                if mime_type is None:
-                    mime_type = 'application/octet-stream'  # Default MIME type if none is found
-                
-                # Read and encode the compressed image file
-                with open(png_path, "rb") as image_file:
-                    base64_encoded = base64.b64encode(image_file.read()).decode('utf-8')
-                
-                # Construct the data URL with proper MIME type
-                data_url = f"data:{mime_type};base64,{base64_encoded}"
+
+                # 2) Transcode to JPEG (correct bytes + extension)
+                jpg_path = temp_dir / f"page_{page_number:04d}.jpg"
+                with Image.open(png_path) as im:
+                    if im.mode in ("RGBA", "P"):
+                        im = im.convert("RGB")
+                    im.save(jpg_path, format="JPEG", quality=85, optimize=True, progressive=True)
+
+                # 3) Enforce size cap on the JPEG
+                _ensure_image_size(jpg_path)
+
+                # 4) Build data URL with the CORRECT MIME for the actual bytes
+                with open(jpg_path, "rb") as image_file:
+                    b64 = base64.b64encode(image_file.read()).decode("utf-8")
+                data_url = f"data:image/jpeg;base64,{b64}"
+
                 page_images_for_gpt[page_number] = data_url
-                print(f"[_images_from_df_path] Page {page_number} rendered successfully ({len(base64_encoded)} bytes, {mime_type})")
+                print(f"[_images_from_df_path] Page {page_number} rendered successfully (base64 chars: {len(b64)})")
             except Exception as e:
                 print(f"[_images_from_df_path] Error rasterizing page {page_number}: {e}")
                 page_images_for_gpt[page_number] = None
-        
+
         print(f"[_images_from_df_path] Completed image generation for {len(page_images_for_gpt)} pages")
         return page_images_for_gpt
     finally:
-        # Always close the PDF document to avoid file handle leaks
         if doc is not None:
             doc.close()
             print(f"[_images_from_df_path] PDF document closed")
-        
-        # Clean up temporary directory
         if temp_dir and temp_dir.exists():
             import shutil
             shutil.rmtree(temp_dir, ignore_errors=True)

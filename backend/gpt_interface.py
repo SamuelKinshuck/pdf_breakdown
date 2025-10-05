@@ -18,12 +18,11 @@ client = None
 if subscription_key:
     try:
         client = AzureOpenAI(
-            api_key=subscription_key,
-            azure_endpoint=endpoint,
-            api_version=api_version,
-            timeout=httpx.Timeout(10.0, read=10.0, write=10.0, pool=10.0),
-            max_retries=0,
-            http_client=httpx.Client(http2=False)
+            api_key=os.getenv("OPENAI_API_KEY"),
+            azure_endpoint="https://oaigad.openai.azure.com/",
+            api_version="2024-12-01-preview",
+            max_retries=4,
+            timeout=httpx.Timeout(60.0, read=90.0, write=60.0, pool=60.0)
         )
     except Exception as e:
         print(f"Warning: Failed to initialize Azure OpenAI client: {e}")
