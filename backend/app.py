@@ -176,17 +176,68 @@ except NameError:
 UPLOAD_ROOT = BASE_DIR / 'uploads'
 
 
+def _ensure_image_size(img_path: Path,
+                       max_bytes: int = 10 * 1024 * 1024,
+                       min_quality: int = 30,
+                       downscale_step: float = 0.90) -> Path:
+    """
+    Guarantee that *img_path* is ≤ *max_bytes* (default 10 MB).
+
+    • First re‑encodes as JPEG, stepping quality ↓ by 5 each loop.
+    • If that fails, scales the image down 10 % per loop until the file
+      fits or the shortest edge drops below 256 px.
+    • Works in‑place; returns the same Path for convenience.
+    """
+    from PIL import Image
+    
+    if img_path.stat().st_size <= max_bytes:
+        return img_path  # already small enough
+
+    with Image.open(img_path) as im:
+        # Always work in RGB; PNG transparency adds bytes.
+        if im.mode in ("RGBA", "P"):
+            im = im.convert("RGB")
+
+        # 1️⃣ quality sweep
+        for q in range(85, min_quality - 1, -5):
+            im.save(img_path, format="JPEG",
+                    quality=q, optimize=True, progressive=True)
+            if img_path.stat().st_size <= max_bytes:
+                return img_path
+
+        # 2️⃣ resolution sweep
+        while img_path.stat().st_size > max_bytes and min(im.size) > 256:
+            new_w = int(im.width * downscale_step)
+            new_h = int(im.height * downscale_step)
+            im = im.resize((new_w, new_h), Image.LANCZOS)
+            im.save(img_path, format="JPEG",
+                    quality=min_quality, optimize=True, progressive=True)
+
+    # If we get here the file is still > max_bytes but we've done our best.
+    return img_path
+
+
 def _images_from_df_path(pdf_path: str,
                          selected_pages: List[int]) -> Dict[int, str]:
     from PIL import Image
-    import io
+    import tempfile
     
     print(f"[_images_from_df_path] Starting image generation for {len(selected_pages)} pages from {pdf_path}")
     doc = None
+    temp_dir = None
     try:
         doc = fitz.open(pdf_path)
+        
+        # Create temporary directory for PNG files (like in the reference code)
+        temp_dir = Path(tempfile.mkdtemp(prefix=f"{Path(pdf_path).stem}_"))
+        
+        # Use DPI-based scaling (default 72 DPI in reference code, we'll use similar approach)
+        dpi = 72  # Can be adjusted as needed
+        scale = dpi / 72
+        mtx = fitz.Matrix(scale, scale)
+        
         page_images_for_gpt = {}
-        MAX_DIM = 1200
+        
         for page_num in range(len(doc)):
             page_number = page_num + 1
             if page_number not in selected_pages:
@@ -194,18 +245,26 @@ def _images_from_df_path(pdf_path: str,
             try:
                 print(f"[_images_from_df_path] Rendering page {page_number}...")
                 page = doc[page_num]
-                rect = page.rect
-                scale = min(MAX_DIM / max(rect.width, rect.height), 2)
-                m = fitz.Matrix(scale, scale)
-                pix = page.get_pixmap(matrix=m, alpha=False)
                 
-                # Convert to PIL Image for JPEG compression with quality control
-                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                # Get pixmap with matrix scaling
+                pix = page.get_pixmap(matrix=mtx)
                 
-                # Save as JPEG with quality setting
-                buffer = io.BytesIO()
-                img.save(buffer, format="JPEG", quality=60, optimize=True, progressive=True)
-                img_bytes = buffer.getvalue()
+                # Save as PNG first (as in reference code)
+                png_path = temp_dir / f"page_{page_num:04d}.png"
+                pix.save(str(png_path))
+                
+                # Apply ensure_image_size compression (iterative quality/resolution reduction)
+                _ensure_image_size(png_path)
+                
+                # Now read the compressed image and convert to base64 data URL
+                with Image.open(png_path) as img:
+                    # Convert to JPEG in memory for final encoding
+                    import io
+                    buffer = io.BytesIO()
+                    if img.mode in ("RGBA", "P"):
+                        img = img.convert("RGB")
+                    img.save(buffer, format="JPEG", quality=85, optimize=True, progressive=True)
+                    img_bytes = buffer.getvalue()
                 
                 base64_encoded = base64.b64encode(img_bytes).decode('utf-8')
                 data_url = f"data:image/jpeg;base64,{base64_encoded}"
@@ -214,6 +273,7 @@ def _images_from_df_path(pdf_path: str,
             except Exception as e:
                 print(f"[_images_from_df_path] Error rasterizing page {page_number}: {e}")
                 page_images_for_gpt[page_number] = None
+        
         print(f"[_images_from_df_path] Completed image generation for {len(page_images_for_gpt)} pages")
         return page_images_for_gpt
     finally:
@@ -221,6 +281,12 @@ def _images_from_df_path(pdf_path: str,
         if doc is not None:
             doc.close()
             print(f"[_images_from_df_path] PDF document closed")
+        
+        # Clean up temporary directory
+        if temp_dir and temp_dir.exists():
+            import shutil
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            print(f"[_images_from_df_path] Cleaned up temporary directory")
 
 
 def _pdf_path_for_file_id(file_id: str) -> str:
