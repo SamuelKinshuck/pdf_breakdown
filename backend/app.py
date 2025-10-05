@@ -52,7 +52,11 @@ from backend.database import (
     save_prompt,
     search_prompts,
     get_prompt_by_id,
-    delete_prompt
+    delete_prompt,
+    create_page_results_table,
+    append_page_result,
+    get_all_page_results,
+    delete_page_results_table
 )
 
 @dataclass
@@ -798,7 +802,7 @@ def _run_process_job(job_id: str,
 
 
 # -----------------------------------------------------------------------------
-# DROP-IN REPLACEMENT: /process (now asynchronous)
+# /process (modified to just initialize job)
 # -----------------------------------------------------------------------------
 @app.route('/process', methods=['POST'])
 def process_document():
@@ -807,7 +811,7 @@ def process_document():
     print('[/process] Received new processing request')
     print(f'[/process] Data: {data}')
 
-    # Extract the same form data as before
+    # Extract form data
     role = data.get('role', '')
     task = data.get('task', '')
     context = data.get('context', '')
@@ -818,7 +822,7 @@ def process_document():
     selected_pages = data.get('selected_pages', [])
     output_config = data.get('output_config', {'outputType': 'browser'})
 
-    # Validate inputs (same constraints as before)
+    # Validate inputs
     if not file_id:
         return jsonify({'success': False, 'error': 'file_id is required'}), 400
     if not isinstance(selected_pages, list) or not selected_pages:
@@ -827,7 +831,7 @@ def process_document():
             'error': 'selected_pages must be a non-empty list'
         }), 400
 
-    # Resolve canonical PDF up-front only to fail fast if missing
+    # Resolve canonical PDF up-front to fail fast if missing
     try:
         _ = _pdf_path_for_file_id(file_id)
     except Exception as e:
@@ -840,34 +844,218 @@ def process_document():
     system_prompt = 'you are a helpful assistant'
     user_prompt = _compose_user_prompt(role, task, context, format_field, constraints)
 
-    # Create a job and kick off a worker thread
+    # Create job state
     job_id = str(uuid.uuid4())
     print(f'[/process] Created job {job_id} for file {file_id}')
     state = _init_job_state(job_id, file_id, selected_pages, model)
     state['output_config'] = output_config
+    state['system_prompt'] = system_prompt
+    state['user_prompt'] = user_prompt
+    state['status'] = 'ready'
+    
     with _JOBS_LOCK:
-        _JOBS[job_id] = state  # type: ignore[assignment]
+        _JOBS[job_id] = state
         print(f'[/process] Active jobs: {len(_JOBS)}')
 
-    worker = threading.Thread(
-        target=_run_process_job,
-        args=(job_id, file_id, selected_pages, system_prompt, user_prompt, model, output_config),
-        daemon=True
-    )
-    worker.start()
-    print(f'[/process] Worker thread started for job {job_id}')
+    # Create SQL table for page results
+    try:
+        create_page_results_table(job_id)
+        print(f'[/process] Created page results table for job {job_id}')
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Failed to create page results table: {e}'
+        }), 500
 
-    # Immediate response so the client can poll for status and partial results
+    # Return job info for frontend to start processing pages
     return jsonify({
         'success': True,
-        'message': 'Processing started',
+        'message': 'Job initialized, ready to process pages',
         'job_id': job_id,
         'file_id': file_id,
         'pages_total': len(selected_pages),
         'selected_pages': sorted(selected_pages),
-        'status': 'queued',
-        'poll_url': f"/process_poll?job_id={job_id}"
-    }), 202
+        'status': 'ready'
+    }), 200
+
+
+# -----------------------------------------------------------------------------
+# NEW ENDPOINT: /process_page
+# -----------------------------------------------------------------------------
+@app.route('/process_page', methods=['POST'])
+def process_page():
+    data = request.get_json()
+    job_id = data.get('job_id')
+    page_number = data.get('page_number')
+    
+    if not job_id or page_number is None:
+        return jsonify({'success': False, 'error': 'job_id and page_number are required'}), 400
+    
+    print(f'[/process_page] Processing page {page_number} for job {job_id}')
+    
+    # Get job state
+    with _JOBS_LOCK:
+        job = _JOBS.get(job_id)
+        if not job:
+            return jsonify({'success': False, 'error': 'Job not found'}), 404
+        
+        file_id = job.get('file_id')
+        selected_pages = job.get('selected_pages', [])
+        system_prompt = job.get('system_prompt')
+        user_prompt = job.get('user_prompt')
+        model = job.get('model')
+        output_config = job.get('output_config', {'outputType': 'browser'})
+    
+    try:
+        # Resolve PDF path
+        pdf_path = _pdf_path_for_file_id(file_id)
+        
+        # Generate image for this specific page
+        images_for_gpt = _images_from_df_path(pdf_path, [page_number])
+        pre_compiled_image = images_for_gpt.get(page_number)
+        
+        if pre_compiled_image is None:
+            print(f'[/process_page] Page {page_number}: No image available')
+            gpt_response = 'Page image not available'
+            image_size_bytes = 0
+        else:
+            image_size_bytes = len(pre_compiled_image)
+            print(f'[/process_page] Page {page_number}: Image size = {image_size_bytes:,} bytes')
+            
+            # Call GPT API
+            if os.getenv('OPENAI_API_KEY') is None:
+                print(f'[/process_page] Page {page_number}: No API key found')
+                gpt_response = 'No API key found'
+            else:
+                try:
+                    print(f'[/process_page] Page {page_number}: Calling GPT API')
+                    gpt_response = get_response_from_chatgpt_image(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        image_path=None,
+                        model=model,
+                        pre_compiled_image=pre_compiled_image
+                    )
+                    print(f'[/process_page] Page {page_number}: GPT API call successful')
+                except BadRequestError:
+                    print(f'[/process_page] Page {page_number}: GPT refused to process')
+                    gpt_response = 'GPT refused to process this page'
+                except Exception as e:
+                    if 'timeout' in str(e).lower() or 'timed out' in str(e).lower():
+                        print(f'[/process_page] Page {page_number}: GPT API timeout')
+                        gpt_response = 'Timed out contacting GPT for this page'
+                    else:
+                        print(f'[/process_page] Page {page_number}: GPT API error: {e}')
+                        gpt_response = f'Unable to get a response from GPT for this page: {e}'
+        
+        # Store result in SQL database
+        append_page_result(job_id, page_number, gpt_response, image_size_bytes)
+        print(f'[/process_page] Page {page_number}: Result stored in database')
+        
+        # Check if this is the last page
+        is_last_page = (page_number == selected_pages[-1])
+        
+        result = {
+            'success': True,
+            'job_id': job_id,
+            'page': page_number,
+            'gpt_response': gpt_response,
+            'image_size_bytes': image_size_bytes,
+            'is_last_page': is_last_page
+        }
+        
+        # If last page, write CSV and delete table
+        if is_last_page:
+            print(f'[/process_page] Last page reached, writing CSV file')
+            try:
+                # Get all results from database
+                all_results = get_all_page_results(job_id)
+                
+                if not all_results:
+                    return jsonify({
+                        'success': False,
+                        'error': 'No results found in database'
+                    }), 500
+                
+                # Create DataFrame
+                df = pd.DataFrame(all_results, columns=["page", "gpt_response"])
+                
+                # Handle output based on output_config
+                if output_config.get('outputType') == 'sharepoint':
+                    print(f'[/process_page] Saving to SharePoint')
+                    context_id = output_config.get('contextId')
+                    sharepoint_folder = output_config.get('sharepointFolder')
+                    filename = output_config.get('filename', 'output.csv')
+                    
+                    if context_id and sharepoint_folder:
+                        def _upload_to_sharepoint():
+                            ctx = _new_ctx(context_id)
+                            return sharepoint_export_df_to_csv(ctx, sharepoint_folder, filename, df)
+                        
+                        try:
+                            future = EXECUTOR.submit(_upload_to_sharepoint)
+                            success = future.result(timeout=60)
+                            
+                            if success:
+                                result['csv_filename'] = filename
+                                result['csv_download_url'] = None
+                            else:
+                                raise Exception("Failed to upload to SharePoint")
+                        except FuturesTimeout:
+                            print("SharePoint upload timed out, falling back to browser output")
+                            timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
+                            csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
+                            upload_dir = UPLOAD_ROOT / file_id
+                            csv_path = upload_dir / csv_filename
+                            df.to_csv(str(csv_path), index=False)
+                            result['csv_filename'] = csv_filename
+                            result['csv_download_url'] = f"/download/{file_id}/{csv_filename}"
+                            result['error'] = "SharePoint upload timed out, saved locally instead"
+                        except Exception as sp_error:
+                            print(f"SharePoint upload error: {sp_error}")
+                            return jsonify({
+                                'success': False,
+                                'error': f"Failed to save to SharePoint: {sp_error}"
+                            }), 500
+                    else:
+                        return jsonify({
+                            'success': False,
+                            'error': 'Missing SharePoint context or folder'
+                        }), 400
+                else:
+                    # Save to local filesystem for browser download
+                    print(f'[/process_page] Saving to local filesystem')
+                    timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
+                    csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
+                    upload_dir = UPLOAD_ROOT / file_id
+                    csv_path = upload_dir / csv_filename
+                    df.to_csv(str(csv_path), index=False)
+                    print(f'[/process_page] CSV saved to {csv_path}')
+                    result['csv_filename'] = csv_filename
+                    result['csv_download_url'] = f"/download/{file_id}/{csv_filename}"
+                
+                # Delete the SQL table
+                delete_page_results_table(job_id)
+                print(f'[/process_page] Deleted page results table for job {job_id}')
+                
+            except Exception as e:
+                print(f'[/process_page] Error writing CSV: {e}')
+                return jsonify({
+                    'success': False,
+                    'error': f'Error writing CSV file: {e}'
+                }), 500
+        
+        return jsonify(result), 200
+        
+    except Exception as e:
+        tb = traceback.format_exc()
+        print('!' * 80)
+        print('error in /process_page')
+        print(tb)
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 
 # -----------------------------------------------------------------------------
