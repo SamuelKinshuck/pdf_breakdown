@@ -830,7 +830,7 @@ def process_page():
                         model=model,
                         functions=get_markdown_schema(),
                         function_name='provide_markdown_response',
-                        pre_compiled_image=None
+                        pre_compiled_images=None
                     )
                     
                     print(f'[/process_page] Page {page_number}: GPT API call successful, parsing response')
