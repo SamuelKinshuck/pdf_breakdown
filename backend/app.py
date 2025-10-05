@@ -873,6 +873,7 @@ def process_page():
         # If last page, write CSV and delete table
         if is_last_page:
             print(f'[/process_page] Last page reached, writing CSV file')
+            csv_path_to_cleanup = None
             try:
                 # Get all results from database
                 all_results = get_all_page_results(job_id)
@@ -893,7 +894,17 @@ def process_page():
                     sharepoint_folder = output_config.get('sharepointFolder')
                     filename = output_config.get('filename', 'output.csv')
                     
-                    if context_id and sharepoint_folder:
+                    if not (context_id and sharepoint_folder):
+                        print(f'[/process_page] Missing SharePoint context or folder, falling back to browser output')
+                        timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
+                        csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
+                        upload_dir = UPLOAD_ROOT / file_id
+                        csv_path = upload_dir / csv_filename
+                        df.to_csv(str(csv_path), index=False)
+                        result['csv_filename'] = csv_filename
+                        result['csv_download_url'] = f"/download/{file_id}/{csv_filename}"
+                        result['error'] = "Missing SharePoint configuration, saved locally instead"
+                    else:
                         def _upload_to_sharepoint():
                             ctx = _new_ctx(context_id)
                             return sharepoint_export_df_to_csv(ctx, sharepoint_folder, filename, df)
@@ -903,12 +914,13 @@ def process_page():
                             success = future.result(timeout=60)
                             
                             if success:
+                                print(f'[/process_page] Successfully uploaded to SharePoint')
                                 result['csv_filename'] = filename
                                 result['csv_download_url'] = None
                             else:
-                                raise Exception("Failed to upload to SharePoint")
-                        except FuturesTimeout:
-                            print("SharePoint upload timed out, falling back to browser output")
+                                raise Exception("SharePoint upload returned False")
+                        except Exception as sp_error:
+                            print(f"SharePoint upload failed: {sp_error}, falling back to browser output")
                             timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
                             csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
                             upload_dir = UPLOAD_ROOT / file_id
@@ -916,18 +928,8 @@ def process_page():
                             df.to_csv(str(csv_path), index=False)
                             result['csv_filename'] = csv_filename
                             result['csv_download_url'] = f"/download/{file_id}/{csv_filename}"
-                            result['error'] = "SharePoint upload timed out, saved locally instead"
-                        except Exception as sp_error:
-                            print(f"SharePoint upload error: {sp_error}")
-                            return jsonify({
-                                'success': False,
-                                'error': f"Failed to save to SharePoint: {sp_error}"
-                            }), 500
-                    else:
-                        return jsonify({
-                            'success': False,
-                            'error': 'Missing SharePoint context or folder'
-                        }), 400
+                            error_msg = "SharePoint upload timed out" if isinstance(sp_error, FuturesTimeout) else f"SharePoint upload failed: {sp_error}"
+                            result['error'] = f"{error_msg}, saved locally instead"
                 else:
                     # Save to local filesystem for browser download
                     print(f'[/process_page] Saving to local filesystem')
@@ -940,9 +942,19 @@ def process_page():
                     result['csv_filename'] = csv_filename
                     result['csv_download_url'] = f"/download/{file_id}/{csv_filename}"
                 
-                # Delete the SQL table
-                delete_page_results_table(job_id)
-                print(f'[/process_page] Deleted page results table for job {job_id}')
+                # Perform cleanup after result is prepared but before returning
+                # This ensures cleanup failures don't prevent the user from getting their CSV
+                try:
+                    print(f'[/process_page] Starting cleanup for job {job_id}')
+                    
+                    # Delete the SQL table
+                    delete_page_results_table(job_id)
+                    print(f'[/process_page] Deleted page results table for job {job_id}')
+                    
+                except Exception as cleanup_error:
+                    # Log but don't raise - cleanup failures shouldn't block CSV delivery
+                    print(f'[/process_page] Warning: Cleanup failed for job {job_id}: {cleanup_error}')
+                    traceback.print_exc()
                 
             except Exception as e:
                 print(f'[/process_page] Error writing CSV: {e}')
