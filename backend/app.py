@@ -683,7 +683,6 @@ def _run_process_job(job_id: str,
                         response = f'Unable to get a response from GPT for this page: {e}'
 
             rows.append({"page": page_no, "gpt_response": response, "image_size_bytes": image_size_bytes})
-            time.sleep(10)
 
             # Update incremental progress
             _save_job(job_id, {
@@ -693,6 +692,7 @@ def _run_process_job(job_id: str,
                 "page_status": {"page": page_no, "state": "completed"}
             })
             print(f"[_run_process_job] Page {page_no} completed ({idx}/{len(pages_in_order)})")
+            time.sleep(3)
 
         # If nothing processed, mark and bail
         if not rows:

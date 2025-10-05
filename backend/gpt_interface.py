@@ -128,7 +128,8 @@ def get_response_from_chatgpt_image_and_functions(system_prompt: str, user_promp
         ],
         temperature=0,  # Setting temperature to 0 makes responses more deterministic
         tools = functions,
-        tool_choice = {"type": "function", "function": {"name": function_name}}
+        tool_choice = {"type": "function", "function": {"name": function_name}},
+        timeout = 10
 
     )
     return response.choices[0].message.tool_calls[0].function.arguments
