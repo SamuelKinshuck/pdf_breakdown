@@ -280,7 +280,7 @@ def _compose_user_prompt(role: str, task: str, context: str, fmt: str,
             f"# Constraints\n{constraints or ''}\n")
 
 
-app = Flask(__name__, static_folder='../frontend/build', static_url_path='')
+app = Flask(__name__, static_folder= str(PROJECT_ROOT) + '/frontend/build', static_url_path='')
 CORS(app)  # allow all origins; tighten in prod
 
 # Configuration
@@ -562,7 +562,7 @@ def upload_file():
 # Helpers for async jobs
 # -----------------------------------------------------------------------------
 def _now_iso() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
 def _init_job_state(job_id: str,
                     file_id: str,
@@ -683,6 +683,7 @@ def _run_process_job(job_id: str,
                         response = f'Unable to get a response from GPT for this page: {e}'
 
             rows.append({"page": page_no, "gpt_response": response, "image_size_bytes": image_size_bytes})
+            time.sleep(10)
 
             # Update incremental progress
             _save_job(job_id, {
@@ -1040,7 +1041,7 @@ try:
         PORT = 8316
     else:
         print('Running in local environment')
-        HOST = '0.0.0.0'
+        HOST = 'localhost'
         PORT = 8000
 except Exception as e:
     print(f'error: {e}')
