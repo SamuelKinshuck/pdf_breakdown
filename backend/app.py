@@ -72,9 +72,8 @@ CTX_TTL_SECONDS = 300
 _JOBS: Dict[str, dict] = {}
 _JOBS_LOCK = threading.Lock()
 
-# Increased from 4 to 8 to handle more concurrent operations (image generation + SharePoint uploads)
-EXECUTOR = ThreadPoolExecutor(max_workers=8)
-OPENAI_CONCURRENCY = threading.BoundedSemaphore(3)
+EXECUTOR = ThreadPoolExecutor(max_workers=3)
+OPENAI_CONCURRENCY = threading.BoundedSemaphore(2)
 
 
 # -----------------------------------------------------------------------------
@@ -185,7 +184,7 @@ def _images_from_df_path(pdf_path: str,
     try:
         doc = fitz.open(pdf_path)
         page_images_for_gpt = {}
-        MAX_DIM = 1600
+        MAX_DIM = 1200
         for page_num in range(len(doc)):
             page_number = page_num + 1
             if page_number not in selected_pages:
@@ -203,7 +202,7 @@ def _images_from_df_path(pdf_path: str,
                 
                 # Save as JPEG with quality setting
                 buffer = io.BytesIO()
-                img.save(buffer, format="JPEG", quality=75, optimize=True)
+                img.save(buffer, format="JPEG", quality=60, optimize=True, progressive=True)
                 img_bytes = buffer.getvalue()
                 
                 base64_encoded = base64.b64encode(img_bytes).decode('utf-8')
