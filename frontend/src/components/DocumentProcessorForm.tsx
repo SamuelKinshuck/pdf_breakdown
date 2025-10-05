@@ -781,6 +781,7 @@ const DocumentProcessorForm: React.FC = () => {
               {isUploading ? 'Uploading...' : 'Choose File'}
             </label>
             <button
+              type = {'button'}
               onClick={() => setShowOutputModal(true)}
               style={{
                 padding: '12px 24px',
