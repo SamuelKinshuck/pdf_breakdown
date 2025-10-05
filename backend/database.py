@@ -382,4 +382,84 @@ def delete_prompt(prompt_id: int) -> Dict[str, Any]:
     
     return {"success": False, "error": "Database is busy, please try again"}
 
+
+def create_page_results_table(job_id: str):
+    """
+    Create a temporary table for storing page processing results for a specific job.
+    
+    Args:
+        job_id: Unique identifier for the processing job
+    """
+    table_name = f"page_results_{job_id.replace('-', '_')}"
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            CREATE TABLE IF NOT EXISTS {table_name} (
+                page_number INTEGER PRIMARY KEY,
+                gpt_response TEXT,
+                image_size_bytes INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        logger.info(f"Created page results table: {table_name}")
+
+
+def append_page_result(job_id: str, page_number: int, gpt_response: str, image_size_bytes: int = 0):
+    """
+    Append a page processing result to the job's table.
+    
+    Args:
+        job_id: Unique identifier for the processing job
+        page_number: Page number that was processed
+        gpt_response: GPT response for this page
+        image_size_bytes: Size of the image sent to GPT
+    """
+    table_name = f"page_results_{job_id.replace('-', '_')}"
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            INSERT OR REPLACE INTO {table_name} 
+            (page_number, gpt_response, image_size_bytes)
+            VALUES (?, ?, ?)
+        """, (page_number, gpt_response, image_size_bytes))
+        logger.info(f"Appended page {page_number} result to {table_name}")
+
+
+def get_all_page_results(job_id: str) -> List[Dict[str, Any]]:
+    """
+    Get all page processing results for a job, sorted by page number.
+    
+    Args:
+        job_id: Unique identifier for the processing job
+        
+    Returns:
+        List of dicts with page_number, gpt_response, image_size_bytes
+    """
+    table_name = f"page_results_{job_id.replace('-', '_')}"
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT page_number, gpt_response, image_size_bytes
+            FROM {table_name}
+            ORDER BY page_number
+        """)
+        rows = cursor.fetchall()
+        results = [{"page": row[0], "gpt_response": row[1], "image_size_bytes": row[2]} for row in rows]
+        logger.info(f"Retrieved {len(results)} page results from {table_name}")
+        return results
+
+
+def delete_page_results_table(job_id: str):
+    """
+    Delete the page results table for a specific job.
+    
+    Args:
+        job_id: Unique identifier for the processing job
+    """
+    table_name = f"page_results_{job_id.replace('-', '_')}"
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+        logger.info(f"Deleted page results table: {table_name}")
+
 init_prompts_table()
