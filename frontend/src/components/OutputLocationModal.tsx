@@ -530,7 +530,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
                     gap: '8px'
                   }}>
                     <span>⏳</span>
-                    Loading...
+                    Loading SharePoint folders...
                   </div>
                 ) : folderContents ? (
                   <div style={{ height: '100%', overflowY: 'auto' }}>
