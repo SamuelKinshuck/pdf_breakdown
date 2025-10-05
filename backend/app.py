@@ -221,6 +221,7 @@ def _images_from_df_path(pdf_path: str,
                          selected_pages: List[int]) -> Dict[int, str]:
     from PIL import Image
     import tempfile
+    from mimetypes import guess_type
     
     print(f"[_images_from_df_path] Starting image generation for {len(selected_pages)} pages from {pdf_path}")
     doc = None
@@ -256,20 +257,19 @@ def _images_from_df_path(pdf_path: str,
                 # Apply ensure_image_size compression (iterative quality/resolution reduction)
                 _ensure_image_size(png_path)
                 
-                # Now read the compressed image and convert to base64 data URL
-                with Image.open(png_path) as img:
-                    # Convert to JPEG in memory for final encoding
-                    import io
-                    buffer = io.BytesIO()
-                    if img.mode in ("RGBA", "P"):
-                        img = img.convert("RGB")
-                    img.save(buffer, format="JPEG", quality=85, optimize=True, progressive=True)
-                    img_bytes = buffer.getvalue()
+                # Guess the MIME type of the image based on the file extension
+                mime_type, _ = guess_type(str(png_path))
+                if mime_type is None:
+                    mime_type = 'application/octet-stream'  # Default MIME type if none is found
                 
-                base64_encoded = base64.b64encode(img_bytes).decode('utf-8')
-                data_url = f"data:image/jpeg;base64,{base64_encoded}"
+                # Read and encode the compressed image file
+                with open(png_path, "rb") as image_file:
+                    base64_encoded = base64.b64encode(image_file.read()).decode('utf-8')
+                
+                # Construct the data URL with proper MIME type
+                data_url = f"data:{mime_type};base64,{base64_encoded}"
                 page_images_for_gpt[page_number] = data_url
-                print(f"[_images_from_df_path] Page {page_number} rendered successfully ({len(base64_encoded)} bytes)")
+                print(f"[_images_from_df_path] Page {page_number} rendered successfully ({len(base64_encoded)} bytes, {mime_type})")
             except Exception as e:
                 print(f"[_images_from_df_path] Error rasterizing page {page_number}: {e}")
                 page_images_for_gpt[page_number] = None
