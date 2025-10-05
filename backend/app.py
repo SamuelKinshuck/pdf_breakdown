@@ -27,7 +27,11 @@ import pandas as pd
 import base64
 from datetime import datetime
 from PyPDF2 import PdfReader
-from backend.gpt_interface import get_response_from_chatgpt_image
+from backend.gpt_interface import (
+    get_response_from_chatgpt_image,
+    get_response_from_chatgpt_image_and_functions,
+    get_markdown_schema
+)
 
 import uuid
 from typing import List, Dict
@@ -798,15 +802,29 @@ def process_page():
                 gpt_response = 'No API key found'
             else:
                 try:
-                    print(f'[/process_page] Page {page_number}: Calling GPT API')
-                    gpt_response = get_response_from_chatgpt_image(
+                    import json
+                    print(f'[/process_page] Page {page_number}: Calling GPT API with function calling')
+                    
+                    raw_response = get_response_from_chatgpt_image_and_functions(
                         system_prompt=system_prompt,
                         user_prompt=user_prompt,
                         image_path=None,
                         model=model,
+                        functions=get_markdown_schema(),
+                        function_name='provide_markdown_response',
                         pre_compiled_image=pre_compiled_image
                     )
-                    print(f'[/process_page] Page {page_number}: GPT API call successful')
+                    
+                    print(f'[/process_page] Page {page_number}: GPT API call successful, parsing response')
+                    
+                    try:
+                        parsed = json.loads(raw_response)
+                        gpt_response = parsed.get('markdown_response', raw_response)
+                    except json.JSONDecodeError:
+                        print(f'[/process_page] Page {page_number}: Failed to parse JSON, using raw response')
+                        gpt_response = raw_response
+                    
+                    print(f'[/process_page] Page {page_number}: Response extracted successfully')
                 except BadRequestError:
                     print(f'[/process_page] Page {page_number}: GPT refused to process')
                     gpt_response = 'GPT refused to process this page'

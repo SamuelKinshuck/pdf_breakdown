@@ -267,6 +267,32 @@ def get_response_from_chatgpt_multiple_image(
                 raise Exception(f"Failed after {max_retries} retries with timeout: {e}")
 
 
+def get_markdown_schema():
+    """
+    Returns a schema that demands a single markdown string response.
+    """
+    return [
+        {
+            "type": "function",
+            "function": {
+                "name": "provide_markdown_response",
+                "description": "Provide your response as a markdown-formatted string",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "markdown_response": {
+                            "type": "string",
+                            "description": "The complete response formatted in markdown"
+                        }
+                    },
+                    "required": ["markdown_response"],
+                    "additionalProperties": False
+                }
+            }
+        }
+    ]
+
+
 def get_embedding(text: str, model = "text-embedding-3-large"):
     if client is None:
         return []
