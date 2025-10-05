@@ -63,17 +63,16 @@ const DocumentProcessorForm: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false)
   const [uploadError, setUploadError] = useState<string>('');
 
-  // --- add to component state ---
+  // Processing state
   const [jobId, setJobId] = useState<string | null>(null);
-  const [pollUrl, setPollUrl] = useState<string | null>(null);
-  const [pollData, setPollData] = useState<PollResponse | null>(null);
-  const [pollError, setPollError] = useState<string | null>(null);
-  const [isPolling, setIsPolling] = useState(false);
+  const [processedPages, setProcessedPages] = useState<{ page: number; gpt_response: string; image_size_bytes?: number }[]>([]);
+  const [processingError, setProcessingError] = useState<string | null>(null);
+  const [totalPages, setTotalPages] = useState<number>(0);
+  const [selectedPagesToProcess, setSelectedPagesToProcess] = useState<number[]>([]);
 
-  const percent = (p: PollResponse | null) => {
-    if (!p || !p.pages_total) return 0;
-    const done = Math.min(p.pages_done ?? 0, p.pages_total);
-    return Math.round((done / p.pages_total) * 100);
+  const percent = () => {
+    if (!totalPages) return 0;
+    return Math.round((processedPages.length / totalPages) * 100);
   };
 
   const downloadCsv = async (absoluteUrl: string, filename?: string | null) => {
@@ -275,6 +274,24 @@ const DocumentProcessorForm: React.FC = () => {
   };
   console.log('isProcessing', isProcessing)
 
+  const processPage = async (jobId: string, pageNumber: number) => {
+    const response = await fetch(`${BACKEND_URL}/process_page`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        job_id: jobId,
+        page_number: pageNumber
+      }),
+    });
+
+    if (!response.ok) {
+      const message = await response.text().catch(() => '');
+      throw new Error(message || `Failed to process page ${pageNumber}`);
+    }
+
+    return await response.json();
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -282,10 +299,11 @@ const DocumentProcessorForm: React.FC = () => {
 
     try {
       setIsProcessing(true);
-      setPollError(null);
-      setPollData(null);
+      setProcessingError(null);
+      setProcessedPages([]);
       setJobId(null);
-      setPollUrl(null);
+      setTotalPages(formData.selectedPages.length);
+      setSelectedPagesToProcess(formData.selectedPages);
 
       const response = await fetch(`${BACKEND_URL}/process`, {
         method: 'POST',
@@ -309,77 +327,64 @@ const DocumentProcessorForm: React.FC = () => {
         throw new Error(message || `Processing failed with status ${response.status}`);
       }
 
-      const data = await response.json(); // 202 with job_id + poll_url
-      if (!data?.success || !data?.job_id || !data?.poll_url) {
-        throw new Error(data?.error || 'No job id or poll url returned.');
+      const data = await response.json();
+      if (!data?.success || !data?.job_id) {
+        throw new Error(data?.error || 'No job id returned.');
       }
 
       setJobId(data.job_id);
-      setPollUrl(`${BACKEND_URL}${data.poll_url}`); // poll_url is like "/process_poll?job_id=..."
-      setIsPolling(true); // polling starts in useEffect below
-    } catch (error) {
-      console.error('Processing error:', error);
-      setPollError(error instanceof Error ? error.message : String(error));
-      setIsProcessing(false);
-      setIsPolling(false);
-      alert('Failed to process document. Please try again.');
-    }
-  };
 
-  useEffect(() => {
-    if (!isPolling || !pollUrl) return;
+      const sortedPages = [...formData.selectedPages].sort((a, b) => a - b);
+      
+      for (const pageNumber of sortedPages) {
+        try {
+          console.log(`Processing page ${pageNumber}...`);
+          const pageResult = await processPage(data.job_id, pageNumber);
+          
+          if (!pageResult.success) {
+            throw new Error(pageResult.error || `Failed to process page ${pageNumber}`);
+          }
 
-    let isMounted = true;
-    let intervalId: number | undefined;
+          setProcessedPages(prev => [...prev, {
+            page: pageResult.page,
+            gpt_response: pageResult.gpt_response,
+            image_size_bytes: pageResult.image_size_bytes
+          }]);
 
-    const tick = async () => {
-      try {
-        const r = await fetch(pollUrl, { method: 'GET' });
-        if (!r.ok) throw new Error(`Poll failed: ${r.status}`);
-        const json: PollResponse = await r.json();
-        if (!isMounted) return;
-        setPollData(json);
-
-        // Stop on terminal states
-        if (json.status === 'completed' || json.status === 'error') {
-          setIsPolling(false);
-          setIsProcessing(false);
-
-          if (json.status === 'completed') {
-            if (outputConfig.outputType === 'browser' && json.csv_download_url) {
-              const absolute = `${BACKEND_URL}${json.csv_download_url}`;
+          if (pageResult.is_last_page) {
+            console.log('Last page processed, downloading CSV');
+            
+            if (outputConfig.outputType === 'browser' && pageResult.csv_download_url) {
+              const absolute = `${BACKEND_URL}${pageResult.csv_download_url}`;
               try {
-                await downloadCsv(absolute, json.csv_filename);
+                await downloadCsv(absolute, pageResult.csv_filename);
                 setShowSuccessModal(true);
               } catch (e) {
                 console.error(e);
-                setPollError(e instanceof Error ? e.message : String(e));
+                setProcessingError(e instanceof Error ? e.message : String(e));
               }
             } else if (outputConfig.outputType === 'sharepoint') {
               setShowSuccessModal(true);
             }
-          } else if (json.status === 'error') {
-            setPollError(json.error || 'Processing failed.');
+            
+            setIsProcessing(false);
+            break;
           }
-
-          if (intervalId) window.clearInterval(intervalId);
+        } catch (pageError) {
+          console.error(`Error processing page ${pageNumber}:`, pageError);
+          setProcessingError(pageError instanceof Error ? pageError.message : String(pageError));
+          setIsProcessing(false);
+          throw pageError;
         }
-      } catch (e) {
-        if (!isMounted) return;
-        setPollError(e instanceof Error ? e.message : String(e));
-        // keep polling; often transient (network) errors
       }
-    };
 
-    // first immediate poll, then every 3s
-    tick();
-    intervalId = window.setInterval(tick, 3000);
-
-    return () => {
-      isMounted = false;
-      if (intervalId) window.clearInterval(intervalId);
-    };
-  }, [isPolling, pollUrl]);
+    } catch (error) {
+      console.error('Processing error:', error);
+      setProcessingError(error instanceof Error ? error.message : String(error));
+      setIsProcessing(false);
+      alert('Failed to process document. Please try again.');
+    }
+  };
 
 
 
@@ -977,7 +982,7 @@ const DocumentProcessorForm: React.FC = () => {
         🚀 {isProcessing ? 'Your Document is being processed' : 'Process Document'}
       </button>
 
-      {(isProcessing || isPolling) && (
+      {isProcessing && (
   <div style={{
     margin: '24px 0',
     padding: '16px',
@@ -991,14 +996,14 @@ const DocumentProcessorForm: React.FC = () => {
       <span style={{ 
         fontSize: '14px', 
         fontWeight: '600',
-        color: pollData?.status === 'completed' 
-          ? colors.secondary.green 
-          : pollData?.status === 'error'
+        color: processingError 
           ? colors.tertiary.red
+          : processedPages.length === totalPages
+          ? colors.secondary.green
           : colors.tertiary.blue,
         textTransform: 'capitalize'
       }}>
-        {pollData?.status ?? 'starting...'}
+        {processingError ? 'error' : processedPages.length === totalPages ? 'completed' : 'processing...'}
       </span>
     </div>
 
@@ -1006,7 +1011,7 @@ const DocumentProcessorForm: React.FC = () => {
       <div style={{ height: 10, background: colors.primary.offWhite, borderRadius: 6, overflow: 'hidden', marginBottom: 12 }}>
         <div
           style={{
-            width: `${percent(pollData)}%`,
+            width: `${percent()}%`,
             height: '100%',
             transition: 'width 300ms ease',
             background: `linear-gradient(90deg, ${colors.secondary.seaGreen}, ${colors.secondary.green})`
@@ -1022,7 +1027,7 @@ const DocumentProcessorForm: React.FC = () => {
         color: colors.tertiary.blueGrey 
       }}>
         <div>
-          <strong>{percent(pollData)}%</strong> - Pages: {pollData?.pages_done ?? 0} / {pollData?.pages_total ?? formData.selectedPages.length}
+          <strong>{percent()}%</strong> - Pages: {processedPages.length} / {totalPages}
         </div>
         <button
           type="button"
@@ -1052,7 +1057,7 @@ const DocumentProcessorForm: React.FC = () => {
         </button>
       </div>
 
-      {pollError && (
+      {processingError && (
         <div style={{ 
           color: colors.tertiary.red, 
           marginTop: 12,
@@ -1061,7 +1066,7 @@ const DocumentProcessorForm: React.FC = () => {
           borderRadius: '6px',
           fontSize: '13px'
         }}>
-          ⚠️ {pollError}
+          ⚠️ {processingError}
         </div>
       )}
     </div>
@@ -1089,8 +1094,9 @@ const DocumentProcessorForm: React.FC = () => {
       <ProcessingDetailsModal
         isOpen={showDetailsModal}
         onClose={() => setShowDetailsModal(false)}
-        pollData={pollData}
-        pollError={pollError}
+        processedPages={processedPages}
+        totalPages={totalPages}
+        processingError={processingError}
       />
 
       {/* Save Prompt Modal */}

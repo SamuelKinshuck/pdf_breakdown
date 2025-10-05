@@ -6,31 +6,20 @@ interface ProcessingResponse {
   image_size_bytes?: number;
 }
 
-interface PollData {
-  status?: string;
-  pages_done?: number;
-  pages_total?: number;
-  last_page?: number | null;
-  responses?: ProcessingResponse[];
-  created_at?: string;
-  started_at?: string | null;
-  updated_at?: string;
-  finished_at?: string | null;
-  error?: string | null;
-}
-
 interface ProcessingDetailsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  pollData: PollData | null;
-  pollError: string | null;
+  processedPages: ProcessingResponse[];
+  totalPages: number;
+  processingError: string | null;
 }
 
 const ProcessingDetailsModal: React.FC<ProcessingDetailsModalProps> = ({ 
   isOpen, 
   onClose, 
-  pollData,
-  pollError 
+  processedPages,
+  totalPages,
+  processingError 
 }) => {
   if (!isOpen) return null;
 
@@ -57,9 +46,19 @@ const ProcessingDetailsModal: React.FC<ProcessingDetailsModalProps> = ({
     }
   };
 
-  const percent = pollData && pollData.pages_total 
-    ? Math.round((Math.min(pollData.pages_done ?? 0, pollData.pages_total) / pollData.pages_total) * 100)
+  const percent = totalPages > 0 
+    ? Math.round((processedPages.length / totalPages) * 100)
     : 0;
+  
+  const status = processingError 
+    ? 'error' 
+    : processedPages.length === totalPages 
+    ? 'completed' 
+    : 'processing';
+  
+  const lastPage = processedPages.length > 0 
+    ? processedPages[processedPages.length - 1].page 
+    : null;
 
   return (
     <div
@@ -154,14 +153,14 @@ const ProcessingDetailsModal: React.FC<ProcessingDetailsModalProps> = ({
                 marginLeft: '8px',
                 fontSize: '14px',
                 fontWeight: '600',
-                color: pollData?.status === 'completed' 
+                color: status === 'completed' 
                   ? colors.secondary.green 
-                  : pollData?.status === 'error'
+                  : status === 'error'
                   ? colors.tertiary.red
                   : colors.tertiary.blue,
                 textTransform: 'capitalize'
               }}>
-                {pollData?.status ?? 'starting...'}
+                {status}
               </span>
             </div>
             <div>
@@ -200,16 +199,16 @@ const ProcessingDetailsModal: React.FC<ProcessingDetailsModalProps> = ({
             color: colors.tertiary.blueGrey
           }}>
             <div>
-              Pages: <strong>{pollData?.pages_done ?? 0} / {pollData?.pages_total ?? 0}</strong>
+              Pages: <strong>{processedPages.length} / {totalPages}</strong>
             </div>
-            {pollData?.last_page && (
+            {lastPage && (
               <div>
-                Last processed: <strong>Page {pollData.last_page}</strong>
+                Last processed: <strong>Page {lastPage}</strong>
               </div>
             )}
           </div>
 
-          {pollError && (
+          {processingError && (
             <div style={{ 
               marginTop: '12px',
               padding: '12px',
@@ -219,13 +218,13 @@ const ProcessingDetailsModal: React.FC<ProcessingDetailsModalProps> = ({
               color: colors.tertiary.red,
               fontSize: '14px'
             }}>
-              ⚠️ {pollError}
+              ⚠️ {processingError}
             </div>
           )}
         </div>
 
         {/* Responses Section */}
-        {pollData?.responses && pollData.responses.length > 0 ? (
+        {processedPages && processedPages.length > 0 ? (
           <>
             <h3 style={{ 
               fontSize: '16px',
@@ -233,7 +232,7 @@ const ProcessingDetailsModal: React.FC<ProcessingDetailsModalProps> = ({
               color: colors.secondary.darkPurple,
               marginBottom: '16px'
             }}>
-              Processed Pages ({pollData.responses.length})
+              Processed Pages ({processedPages.length})
             </h3>
             <div style={{
               flex: 1,
@@ -243,11 +242,11 @@ const ProcessingDetailsModal: React.FC<ProcessingDetailsModalProps> = ({
               borderRadius: '12px',
               border: `1px solid ${colors.primary.lightBlue}`
             }}>
-              {pollData.responses.map((r, idx) => (
+              {processedPages.map((r, idx) => (
                 <div 
                   key={r.page} 
                   style={{ 
-                    marginBottom: idx < pollData.responses!.length - 1 ? '16px' : 0,
+                    marginBottom: idx < processedPages.length - 1 ? '16px' : 0,
                     padding: '16px',
                     backgroundColor: colors.primary.white,
                     borderRadius: '8px',
