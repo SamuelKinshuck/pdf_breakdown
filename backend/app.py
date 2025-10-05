@@ -73,7 +73,6 @@ _JOBS: Dict[str, dict] = {}
 _JOBS_LOCK = threading.Lock()
 
 EXECUTOR = ThreadPoolExecutor(max_workers=3)
-OPENAI_CONCURRENCY = threading.BoundedSemaphore(2)
 
 
 # -----------------------------------------------------------------------------
@@ -623,24 +622,10 @@ def _run_process_job(job_id: str,
         pdf_path = _pdf_path_for_file_id(file_id)
         print(f"[_run_process_job] PDF path resolved: {pdf_path}")
         
-        # Use ThreadPoolExecutor to run image generation with timeout
-        print(f"[_run_process_job] Starting image generation with timeout...")
-        def _generate_images():
-            return _images_from_df_path(pdf_path, selected_pages)
-        
-        future = EXECUTOR.submit(_generate_images)
-        try:
-            # 5 minute timeout for image generation (generous for large PDFs)
-            images_for_gpt = future.result(timeout=300)
-            print(f"[_run_process_job] Image generation completed successfully")
-        except FuturesTimeout:
-            print(f"[_run_process_job] Image generation timed out after 300 seconds")
-            _save_job(job_id, {
-                "status": "error",
-                "error": "PDF image generation timed out. The PDF may be too large or corrupted.",
-                "finished_at": _now_iso()
-            })
-            return
+        # Generate images from PDF
+        print(f"[_run_process_job] Starting image generation...")
+        images_for_gpt = _images_from_df_path(pdf_path, selected_pages)
+        print(f"[_run_process_job] Image generation completed successfully")
 
         pages_in_order = sorted([p for p in selected_pages if p in images_for_gpt])
         print(f"[_run_process_job] Processing {len(pages_in_order)} pages in order: {pages_in_order}")
@@ -671,21 +656,20 @@ def _run_process_job(job_id: str,
             image_size_bytes = len(pre_compiled_image)
             print(f"[_run_process_job] Page {page_no}: Image size = {image_size_bytes:,} bytes ({image_size_bytes / 1024:.2f} KB)")
 
-            # Do the GPT call with timeout
+            # Do the GPT call
             if os.getenv('OPENAI_API_KEY') is None:
                 print(f"[_run_process_job] Page {page_no}: No API key found")
                 response = 'No API key found'
             else:
                 try:
                     print(f"[_run_process_job] Page {page_no}: Calling GPT API ")
-                    with OPENAI_CONCURRENCY:
-                        response = get_response_from_chatgpt_image(
-                            system_prompt=system_prompt,
-                            user_prompt=user_prompt,
-                            image_path=None,
-                            model=model,
-                            pre_compiled_image=pre_compiled_image
-                        )
+                    response = get_response_from_chatgpt_image(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        image_path=None,
+                        model=model,
+                        pre_compiled_image=pre_compiled_image
+                    )
                     print(f"[_run_process_job] Page {page_no}: GPT API call successful")
                 except BadRequestError:
                     print(f"[_run_process_job] Page {page_no}: GPT refused to process")
