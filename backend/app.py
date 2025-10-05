@@ -802,7 +802,7 @@ def process_page():
         pdf_path = _pdf_path_for_file_id(file_id)
         
         # Generate image for this specific page
-        img_paths = pdf_pages_to_images(pdf_path, selected_pages)
+        img_paths = pdf_pages_to_images(Path(pdf_path), selected_pages)
         images_for_gpt = _images_from_df_path(pdf_path, [page_number])
         pre_compiled_image = images_for_gpt.get(page_number)
         
