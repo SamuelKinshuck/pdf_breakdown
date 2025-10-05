@@ -31,6 +31,8 @@ from backend.gpt_interface import get_response_from_chatgpt_image
 
 import uuid
 from typing import List, Dict
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 
 from dataclasses import dataclass
 import time
@@ -63,10 +65,15 @@ _CONNECTIONS: Dict[str, ConnectionInfo] = {}
 
 # Cached ClientContext objects keyed by context_id
 _CTX_CACHE: Dict[str, tuple[Any, float]] = {}  # value = (ctx, created_timestamp)
+_CTX_CACHE_LOCK = threading.Lock()
 CTX_TTL_SECONDS = 300
 
 
 _JOBS: Dict[str, dict] = {}
+_JOBS_LOCK = threading.Lock()
+
+EXECUTOR = ThreadPoolExecutor(max_workers=3)
+OPENAI_CONCURRENCY = threading.BoundedSemaphore(2)
 
 
 # -----------------------------------------------------------------------------
