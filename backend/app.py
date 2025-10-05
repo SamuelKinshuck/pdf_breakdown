@@ -227,14 +227,14 @@ def pdf_pages_to_images(pdf_path: Path, selected_pages: List, dpi: int = 200) ->
     scale = dpi / 72
     mtx = fitz.Matrix(scale, scale)
     tmp = Path(tempfile.mkdtemp(prefix=f"{pdf_path.stem}_"))
-    paths: List[Path] = []
+    paths: Dict[int, Path] = {}
     for i, page in enumerate(doc):
         if (i + 1) in selected_pages:
             pix = page.get_pixmap(matrix=mtx)
             out = tmp / f"page_{i:04d}.png"
             pix.save(out)
             _ensure_image_size(out)
-            paths.append(out)
+            paths[i+1] = out
     doc.close()
     return paths
 
@@ -802,7 +802,7 @@ def process_page():
         pdf_path = _pdf_path_for_file_id(file_id)
         
         # Generate image for this specific page
-        img_paths = pdf_pages_to_images(Path(pdf_path), selected_pages)
+        img_paths = pdf_pages_to_images(Path(pdf_path), [int(page_number)])
         images_for_gpt = _images_from_df_path(pdf_path, [page_number])
         pre_compiled_image = images_for_gpt.get(page_number)
         
@@ -826,7 +826,7 @@ def process_page():
                     raw_response = get_response_from_chatgpt_multiple_image_and_functions(
                         system_prompt=system_prompt,
                         user_prompt=user_prompt,
-                        image_paths=img_paths,
+                        image_paths=[img_paths[int(page_number)]],
                         model=model,
                         functions=get_markdown_schema(),
                         function_name='provide_markdown_response',
