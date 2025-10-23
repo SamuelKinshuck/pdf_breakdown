@@ -1,0 +1,7 @@
+*.pptx
+.idea
+backend/data
+backend/uploads
+example/
+uploads
+backend/__pycache__
