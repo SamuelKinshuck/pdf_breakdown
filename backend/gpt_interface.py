@@ -136,7 +136,7 @@ def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_
     else:
         image_data_url = local_image_to_data_url(image_path)
     
-    max_retries = 3
+    max_retries = 1
     for attempt in range(max_retries):
         try:
             create_params = {
@@ -173,7 +173,7 @@ def get_response_from_chatgpt_image_and_functions(system_prompt: str, user_promp
     else:
         image_data_url = local_image_to_data_url(image_path)
     
-    max_retries = 3
+    max_retries = 1
     for attempt in range(max_retries):
         try:
             response = client.chat.completions.create(
@@ -218,7 +218,7 @@ def get_response_from_chatgpt_multiple_image_and_functions(
     else:
         image_data_urls = [local_image_to_data_url(path) for path in image_paths]
 
-    max_retries = 3
+    max_retries = 1
     for attempt in range(max_retries):
         try:
             content = [{"type": "text", "text": user_prompt}]
@@ -262,7 +262,7 @@ def get_response_from_chatgpt_multiple_image(
     else:
         image_data_urls = [local_image_to_data_url(path) for path in image_paths]
 
-    max_retries = 3
+    max_retries = 1
     for attempt in range(max_retries):
         try:
             content = [{"type": "text", "text": user_prompt}]
