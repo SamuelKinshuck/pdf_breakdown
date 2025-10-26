@@ -21,7 +21,7 @@ if subscription_key:
             api_key=os.getenv("OPENAI_API_KEY"),
             azure_endpoint="https://oaigad.openai.azure.com/",
             api_version="2024-12-01-preview",
-            max_retries=1,
+            max_retries=0,
             timeout=httpx.Timeout(30.0, read=30.0, write=30.0, pool=30.0)
         )
     except Exception as e:
@@ -30,33 +30,55 @@ if subscription_key:
 
 def _reduce_image_size_by_half(data_url: str) -> str:
     """
-    Reduce an image data URL by 50% in both dimensions.
-    Returns a new data URL with the reduced image.
+    Reduce an image data URL by ~50% in both dimensions.
+    Always returns a PNG data URL (image/png), preserving alpha when present.
     """
+    import base64, io
+    from urllib.parse import unquote_to_bytes
+    from PIL import Image, ImageFile
+
+    # Be tolerant of truncated inputs
+    ImageFile.LOAD_TRUNCATED_IMAGES = True
+
     try:
-        if not data_url.startswith('data:'):
+        if not (isinstance(data_url, str) and data_url.startswith('data:')):
             return data_url
-        
-        header, base64_data = data_url.split(',', 1)
-        mime_type = header.split(';')[0].replace('data:', '')
-        
-        img_bytes = base64.b64decode(base64_data)
-        
-        img = Image.open(io.BytesIO(img_bytes))
-        
-        new_width = max(1, img.width // 2)
-        new_height = max(1, img.height // 2)
-        img_resized = img.resize((new_width, new_height), Image.LANCZOS)
-        
-        if img_resized.mode in ("RGBA", "P"):
-            img_resized = img_resized.convert("RGB")
-        
-        buffer = io.BytesIO()
-        img_resized.save(buffer, format="JPEG", quality=85, optimize=True)
-        reduced_bytes = buffer.getvalue()
-        reduced_base64 = base64.b64encode(reduced_bytes).decode('utf-8')
-        
-        return f"data:image/jpeg;base64,{reduced_base64}"
+
+        header, payload = data_url.split(',', 1)
+        is_base64 = ';base64' in header
+
+        img_bytes = base64.b64decode(payload) if is_base64 else unquote_to_bytes(payload)
+
+        with Image.open(io.BytesIO(img_bytes)) as img:
+            # Use first frame if animated
+            if getattr(img, "is_animated", False):
+                img.seek(0)
+
+            new_w = max(1, img.width // 2)
+            new_h = max(1, img.height // 2)
+
+            # Work in RGBA if there might be transparency; otherwise RGB
+            has_alpha = (
+                (img.mode in ("RGBA", "LA")) or
+                ("transparency" in img.info)
+            )
+            work = img.convert("RGBA") if has_alpha else img.convert("RGB")
+            resized = work.resize((new_w, new_h), Image.LANCZOS)
+
+            # If no alpha, palette-quantize to shrink PNGs further.
+            to_save = resized
+            if not has_alpha:
+                try:
+                    to_save = resized.quantize(colors=256, method=Image.MEDIANCUT, dither=Image.FLOYDSTEINBERG)
+                except Exception:
+                    to_save = resized  # fallback without quantization
+
+            buf = io.BytesIO()
+            to_save.save(buf, format="PNG", optimize=True, compress_level=9)
+            out_b64 = base64.b64encode(buf.getvalue()).decode('utf-8')
+
+            return f"data:image/png;base64,{out_b64}"
+
     except Exception as e:
         print(f"Warning: Failed to reduce image size: {e}")
         return data_url

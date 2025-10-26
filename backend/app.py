@@ -181,45 +181,47 @@ UPLOAD_ROOT = BASE_DIR / 'uploads'
 
 
 
-def _ensure_image_size(img_path: Path,
-                       max_bytes: int = 10 * 1024 * 1024,
-                       min_quality: int = 30,
-                       downscale_step: float = 0.90) -> Path:
+def _ensure_png_size(img_path: Path,
+                     max_bytes: int = 10 * 1024 * 1024,
+                     min_side_px: int = 256,
+                     downscale_step: float = 0.90,
+                     quantize_steps: list[int] = [256, 128, 64]) -> Path:
     """
-    Guarantee that *img_path* is ≤ *max_bytes* (default 10 MB).
+    Ensure *img_path* (PNG) is ≤ *max_bytes* while keeping it PNG.
 
-    • First re‑encodes as JPEG, stepping quality ↓ by 5 each loop.
-    • If that fails, scales the image down 10 % per loop until the file
-      fits or the shortest edge drops below 256 px.
-    • Works in‑place; returns the same Path for convenience.
+    Strategy:
+    • Try palette quantization (256→128→64 colors) with PNG optimize.
+    • If still too big, progressively downscale by 10% until it fits
+      or the shortest edge reaches *min_side_px*.
     """
     from PIL import Image
-    
+
     if img_path.stat().st_size <= max_bytes:
-        return img_path  # already small enough
+        return img_path
 
     with Image.open(img_path) as im:
-        # Always work in RGB; PNG transparency adds bytes.
-        if im.mode in ("RGBA", "P"):
-            im = im.convert("RGB")
+        # Work in RGBA when possible; quantize will palette it.
+        im = im.convert("RGBA")
 
-        # 1️⃣ quality sweep
-        for q in range(85, min_quality - 1, -5):
-            im.save(img_path, format="JPEG",
-                    quality=q, optimize=True, progressive=True)
+        # 1) Quantization passes
+        for colors in quantize_steps:
+            im_q = im.quantize(colors=colors, method=Image.MEDIANCUT, dither=Image.FLOYDSTEINBERG)
+            im_q.save(img_path, format="PNG", optimize=True, compress_level=9)
             if img_path.stat().st_size <= max_bytes:
                 return img_path
 
-        # 2️⃣ resolution sweep
-        while img_path.stat().st_size > max_bytes and min(im.size) > 256:
-            new_w = int(im.width * downscale_step)
-            new_h = int(im.height * downscale_step)
-            im = im.resize((new_w, new_h), Image.LANCZOS)
-            im.save(img_path, format="JPEG",
-                    quality=min_quality, optimize=True, progressive=True)
+        # 2) Resolution sweep
+        curr = im
+        while img_path.stat().st_size > max_bytes and min(curr.size) > min_side_px:
+            new_w = max(min_side_px, int(curr.width * downscale_step))
+            new_h = max(min_side_px, int(curr.height * downscale_step))
+            if new_w == curr.width and new_h == curr.height:
+                break
+            curr = curr.resize((new_w, new_h), Image.LANCZOS)
+            curr.save(img_path, format="PNG", optimize=True, compress_level=9)
 
-    # If we get here the file is still > max_bytes but we've done our best.
     return img_path
+
 
 import tempfile
 def pdf_pages_to_images(pdf_path: Path, selected_pages: List, dpi: int = 200) -> List[Path]:
@@ -230,40 +232,27 @@ def pdf_pages_to_images(pdf_path: Path, selected_pages: List, dpi: int = 200) ->
     paths: Dict[int, Path] = {}
     for i, page in enumerate(doc):
         if (i + 1) in selected_pages:
-            pix = page.get_pixmap(matrix=mtx)
+            pix = page.get_pixmap(matrix=mtx)  # PNG by default with .save(...)
             out = tmp / f"page_{i:04d}.png"
-            pix.save(out)
-            _ensure_image_size(out)
+            pix.save(out)                      # writes PNG bytes
+            _ensure_png_size(out)              # <-- use the PNG version
             paths[i+1] = out
     doc.close()
     return paths
 
 def _images_from_df_path(pdf_path: str,
                          selected_pages: List[int]) -> Dict[int, str]:
-    from PIL import Image
-    import tempfile
+    import tempfile, base64
     from pathlib import Path
-    import base64
-
     print(f"[_images_from_df_path] Starting image generation for {len(selected_pages)} pages from {pdf_path}")
     doc = None
     temp_dir = None
     try:
         doc = fitz.open(pdf_path)
-
-        # Validate pages (1-indexed input)
         max_page = len(doc)
-        pages_to_render = []
-        for p in selected_pages:
-            if 1 <= p <= max_page:
-                pages_to_render.append(p)
-            else:
-                print(f"[_images_from_df_path] Skipping out-of-range page: {p} (valid 1..{max_page})")
-
-        # Create temporary directory for images
+        pages_to_render = [p for p in selected_pages if 1 <= p <= max_page]
         temp_dir = Path(tempfile.mkdtemp(prefix=f"{Path(pdf_path).stem}_"))
 
-        # DPI-based scaling (keep your original)
         dpi = 72
         scale = dpi / 72
         mtx = fitz.Matrix(scale, scale)
@@ -276,24 +265,13 @@ def _images_from_df_path(pdf_path: str,
                 page = doc[page_number - 1]
                 pix = page.get_pixmap(matrix=mtx)
 
-                # 1) Write a PNG first (fast path from PyMuPDF)
                 png_path = temp_dir / f"page_{page_number:04d}.png"
-                pix.save(str(png_path))
+                pix.save(str(png_path))                 # keep PNG
+                _ensure_png_size(png_path)              # enforce size as PNG
 
-                # 2) Transcode to JPEG (correct bytes + extension)
-                jpg_path = temp_dir / f"page_{page_number:04d}.jpg"
-                with Image.open(png_path) as im:
-                    if im.mode in ("RGBA", "P"):
-                        im = im.convert("RGB")
-                    im.save(jpg_path, format="JPEG", quality=85, optimize=True, progressive=True)
-
-                # 3) Enforce size cap on the JPEG
-                _ensure_image_size(jpg_path)
-
-                # 4) Build data URL with the CORRECT MIME for the actual bytes
-                with open(jpg_path, "rb") as image_file:
+                with open(png_path, "rb") as image_file:
                     b64 = base64.b64encode(image_file.read()).decode("utf-8")
-                data_url = f"data:image/jpeg;base64,{b64}"
+                data_url = f"data:image/png;base64,{b64}"  # <-- PNG mime
 
                 page_images_for_gpt[page_number] = data_url
                 print(f"[_images_from_df_path] Page {page_number} rendered successfully (base64 chars: {len(b64)})")
