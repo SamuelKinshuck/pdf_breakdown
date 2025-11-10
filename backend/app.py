@@ -8,6 +8,8 @@ from pptx import Presentation
 import sys
 from pathlib import Path
 
+import re
+
 # Add the project root (one level up from this file) to sys.path
 try:
     BASE_DIR = Path(__file__).resolve().parent
@@ -376,6 +378,7 @@ def allowed_file(filename):
 def download(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'],
                                filename,
+                               mimetype="text/csv; charset=utf-8",
                                as_attachment=True)
 
 
@@ -749,7 +752,7 @@ def process_document():
 
 
 # -----------------------------------------------------------------------------
-# NEW ENDPOINT: /process_page
+#  /process_page
 # -----------------------------------------------------------------------------
 @app.route('/process_page', methods=['POST'])
 def process_page():
@@ -836,8 +839,11 @@ def process_page():
         append_page_result(job_id, page_number, gpt_response, image_size_bytes)
         print(f'[/process_page] Page {page_number}: Result stored in database')
         
-        # Check if this is the last page
-        is_last_page = (page_number == selected_pages[-1])
+        # Check if this is the last page (be robust to type mismatches / empty list)
+        try:
+            is_last_page = bool(selected_pages) and (int(page_number) == int(selected_pages[-1]))
+        except Exception:
+            is_last_page = False
         
         result = {
             'success': True,
@@ -851,8 +857,8 @@ def process_page():
         # If last page, write CSV and delete table
         if is_last_page:
             print(f'[/process_page] Last page reached, writing CSV file')
-            csv_path_to_cleanup = None
             try:
+                import csv, re, unicodedata
                 # Get all results from database
                 all_results = get_all_page_results(job_id)
                 
@@ -864,7 +870,27 @@ def process_page():
                 
                 # Create DataFrame
                 df = pd.DataFrame(all_results, columns=["page", "gpt_response"])
-                
+
+                # ---- Hardening: clean text to avoid control chars / normalization issues ----
+                _CTRL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")  # keep \t \n \r
+
+                def _clean_cell(x):
+                    if isinstance(x, (bytes, bytearray)):
+                        try:
+                            x = x.decode('utf-8')
+                        except Exception:
+                            x = x.decode('utf-8', 'replace')
+                    if isinstance(x, str):
+                        x = unicodedata.normalize('NFC', x)
+                        x = _CTRL_RE.sub('', x)
+                    return x
+
+                df = df.applymap(_clean_cell)
+                # ---------------------------------------------------------------------------
+
+                # Prefer Excel-friendly UTF-8 with BOM for widest compatibility
+                ENCODING = 'utf-8-sig'
+
                 # Handle output based on output_config
                 if output_config.get('outputType') == 'sharepoint':
                     print(f'[/process_page] Saving to SharePoint')
@@ -878,12 +904,17 @@ def process_page():
                         csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
                         upload_dir = UPLOAD_ROOT / file_id
                         csv_path = upload_dir / csv_filename
-                        df.to_csv(str(csv_path), index=False)
+                        upload_dir.mkdir(parents=True, exist_ok=True)
+                        # Explicit encoding + newline handling
+                        with open(csv_path, 'w', encoding=ENCODING, newline='') as f:
+                            df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
                         result['csv_filename'] = csv_filename
                         result['csv_download_url'] = f"/download/{file_id}/{csv_filename}"
+                        result['note'] = f"Saved locally with {ENCODING} encoding"
                         result['error'] = "Missing SharePoint configuration, saved locally instead"
                     else:
                         def _upload_to_sharepoint():
+                            # If your helper supports passing encoding, add it there.
                             ctx = _new_ctx(context_id)
                             return sharepoint_export_df_to_csv(ctx, sharepoint_folder, filename, df)
                         
@@ -895,6 +926,7 @@ def process_page():
                                 print(f'[/process_page] Successfully uploaded to SharePoint')
                                 result['csv_filename'] = filename
                                 result['csv_download_url'] = None
+                                result['note'] = f"Uploaded to SharePoint (data cleaned, CSV intended as UTF-8)"
                             else:
                                 raise Exception("SharePoint upload returned False")
                         except Exception as sp_error:
@@ -903,11 +935,14 @@ def process_page():
                             csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
                             upload_dir = UPLOAD_ROOT / file_id
                             csv_path = upload_dir / csv_filename
-                            df.to_csv(str(csv_path), index=False)
+                            upload_dir.mkdir(parents=True, exist_ok=True)
+                            with open(csv_path, 'w', encoding=ENCODING, newline='') as f:
+                                df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
                             result['csv_filename'] = csv_filename
                             result['csv_download_url'] = f"/download/{file_id}/{csv_filename}"
                             error_msg = "SharePoint upload timed out" if isinstance(sp_error, FuturesTimeout) else f"SharePoint upload failed: {sp_error}"
                             result['error'] = f"{error_msg}, saved locally instead"
+                            result['note'] = f"Saved locally with {ENCODING} encoding"
                 else:
                     # Save to local filesystem for browser download
                     print(f'[/process_page] Saving to local filesystem')
@@ -915,20 +950,19 @@ def process_page():
                     csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
                     upload_dir = UPLOAD_ROOT / file_id
                     csv_path = upload_dir / csv_filename
-                    df.to_csv(str(csv_path), index=False)
+                    upload_dir.mkdir(parents=True, exist_ok=True)
+                    with open(csv_path, 'w', encoding=ENCODING, newline='') as f:
+                        df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
                     print(f'[/process_page] CSV saved to {csv_path}')
                     result['csv_filename'] = csv_filename
                     result['csv_download_url'] = f"/download/{file_id}/{csv_filename}"
+                    result['note'] = f"Saved locally with {ENCODING} encoding"
                 
                 # Perform cleanup after result is prepared but before returning
-                # This ensures cleanup failures don't prevent the user from getting their CSV
                 try:
                     print(f'[/process_page] Starting cleanup for job {job_id}')
-                    
-                    # Delete the SQL table
                     delete_page_results_table(job_id)
                     print(f'[/process_page] Deleted page results table for job {job_id}')
-                    
                 except Exception as cleanup_error:
                     # Log but don't raise - cleanup failures shouldn't block CSV delivery
                     print(f'[/process_page] Warning: Cleanup failed for job {job_id}: {cleanup_error}')
@@ -952,9 +986,6 @@ def process_page():
             'success': False,
             'error': str(e)
         }), 500
-
-
-
 
 
 @app.route("/api/ping")
