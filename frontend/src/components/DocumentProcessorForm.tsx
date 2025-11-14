@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import CollapsibleSection from './CollapsibleSection';
 import SuccessModal from './SuccessModal';
 import CustomDropdown from './CustomDropdown';
@@ -8,6 +8,18 @@ import SavePromptModal, { SavePromptData } from './SavePromptModal';
 import SearchPromptsModal, { SavedPrompt } from './SearchPromptsModal';
 import { BACKEND_URL } from '../apiConfig';
 
+interface InitFromSharepointResponse {
+  success: boolean;
+  pdf_file: FileUploadResponse;
+  prompt: {
+    role: string;
+    task: string;
+    context: string;
+    format: string;
+    constraints: string;
+  };
+  error?: string;
+} 
 interface FormData {
   role: string;
   task: string;
@@ -45,15 +57,95 @@ const DocumentProcessorForm: React.FC = () => {
   const [isProcessing, setIsProcessing] = useState(false)
   const [uploadError, setUploadError] = useState<string>('');
 
+  // NEW: URL-based initialisation state
+  const [isInitializing, setIsInitializing] = useState(false);
+  const [initError, setInitError] = useState<string | null>(null);
+  const [initializedFromUrl, setInitializedFromUrl] = useState(false);
+
   // Processing state
   const [processedPages, setProcessedPages] = useState<{ page: number; gpt_response: string; image_size_bytes?: number }[]>([]);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [totalPages, setTotalPages] = useState<number>(0);
 
+  
+
   const percent = () => {
     if (!totalPages) return 0;
     return Math.round((processedPages.length / totalPages) * 100);
   };
+
+  useEffect(() => {
+  // Parse query params from the current URL
+  const searchParams = new URLSearchParams(window.location.search);
+
+  const pdfPath = searchParams.get('pdfPath');
+  const xlsxPath = searchParams.get('xlsxPath');
+  const sheet = searchParams.get('sheet');
+  const range = searchParams.get('range');
+
+  // Only do the special flow if we actually have the SharePoint parameters
+  if (!pdfPath || !xlsxPath) {
+    return;
+  }
+
+  // Start init state
+  setIsInitializing(true);
+  setInitError(null);
+  setUploadError('');
+
+  const initFromSharepoint = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}init_from_sharepoint`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pdf_path: pdfPath,
+          xlsx_path: xlsxPath,
+          sheet,
+          range
+        })
+      });
+
+      if (!response.ok) {
+        const msg = await response.text().catch(() => '');
+        throw new Error(msg || `Init failed with status ${response.status}`);
+      }
+
+      const data = (await response.json()) as InitFromSharepointResponse;
+
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to initialise from SharePoint.');
+      }
+
+      // 1) Pretend the PDF has been uploaded (so page selection etc. works)
+      setFileInfo(data.pdf_file);
+
+      // 2) Fill in the prompt fields
+      setFormData(prev => ({
+        ...prev,
+        role: data.prompt.role || '',
+        task: data.prompt.task || '',
+        context: data.prompt.context || '',
+        format: data.prompt.format || '',
+        constraints: data.prompt.constraints || '',
+        // Optional: auto-select all pages by default
+        selectedPages: Array.from(
+          { length: data.pdf_file.page_count },
+          (_, i) => i + 1
+        )
+      }));
+
+      setInitializedFromUrl(true);
+    } catch (err: any) {
+      console.error('Init from SharePoint error:', err);
+      setInitError(err.message || 'Failed to load data from SharePoint URL.');
+    } finally {
+      setIsInitializing(false);
+    }
+  };
+
+  void initFromSharepoint();
+}, []);
 
   const downloadCsv = async (absoluteUrl: string, filename?: string | null) => {
     const dlResp = await fetch(absoluteUrl);
@@ -405,6 +497,76 @@ const DocumentProcessorForm: React.FC = () => {
     marginTop: '4px',
     fontStyle: 'italic'
   };
+
+  if (isInitializing) {
+    return (
+      <div
+        style={{
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+          padding: '40px',
+          maxWidth: '800px',
+          margin: '80px auto',
+          backgroundColor: colors.primary.offWhite,
+          borderRadius: '20px',
+          boxShadow: `0 12px 40px ${colors.tertiary.blueGrey}25`,
+          textAlign: 'center'
+        }}
+      >
+        <h2
+          style={{
+            color: colors.primary.darkGrey,
+            fontSize: '24px',
+            marginBottom: '16px'
+          }}
+        >
+          Please wait while we access the information from your files…
+        </h2>
+        <p
+          style={{
+            color: colors.tertiary.blueGrey,
+            fontSize: '14px',
+            marginBottom: '16px'
+          }}
+        >
+          We’re retrieving your PDF and prompt configuration from SharePoint.
+        </p>
+
+        {/* Simple loader bar */}
+        <div
+          style={{
+            height: '8px',
+            width: '60%',
+            margin: '0 auto',
+            borderRadius: '999px',
+            backgroundColor: colors.primary.white,
+            overflow: 'hidden',
+            border: `1px solid ${colors.primary.lightBlue}`
+          }}
+        >
+          <div
+            style={{
+              width: '50%',
+              height: '100%',
+              background: `linear-gradient(90deg, ${colors.secondary.seaGreen}, ${colors.secondary.green})`,
+              animation: 'loadingBar 1s infinite alternate'
+            }}
+          />
+        </div>
+
+        {initError && (
+          <p
+            style={{
+              marginTop: '20px',
+              color: colors.tertiary.red,
+              fontSize: '14px'
+            }}
+          >
+            ⚠️ {initError}
+          </p>
+        )}
+      </div>
+    );
+  }
 
   return (
     <form onSubmit={handleSubmit} style={{ 
@@ -818,8 +980,27 @@ const DocumentProcessorForm: React.FC = () => {
             </p>
           )}
           {formData.file && (
-            <p style={{ color: colors.secondary.seaGreen, marginTop: '8px', fontSize: '14px' }}>
+            <p
+              style={{
+                color: colors.secondary.seaGreen,
+                marginTop: '8px',
+                fontSize: '14px'
+              }}
+            >
               Selected: {formData.file.name}
+            </p>
+          )}
+
+          {/* NEW: show info when PDF came from SharePoint init */}
+          {!formData.file && fileInfo && initializedFromUrl && (
+            <p
+              style={{
+                color: colors.secondary.seaGreen,
+                marginTop: '8px',
+                fontSize: '14px'
+              }}
+            >
+              PDF loaded from SharePoint: {fileInfo.filename} ({fileInfo.page_count} pages)
             </p>
           )}
           {outputConfig.outputType === 'sharepoint' && outputConfig.sharepointFolder && (
