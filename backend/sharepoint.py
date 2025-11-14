@@ -212,14 +212,14 @@ def sharepoint_import_excel(ctx, sp_file_url, sheet=None, version_label="Current
     if custom_function == None:
         try:
             df = pd.read_excel(file_stream, sheet_name=sheet)
-        except:
-            print("Error creating dataframe....")
+        except Exception as e:
+            print("Error creating dataframe...." + str(e))
             df = None
     else:
         try:
             df = custom_function(file_stream)
-        except:
-            print("Error creating dataframe....")
+        except Exception as e:
+            print("Error creating dataframe...." + str(e))
             df = None
 
     file_stream.close()

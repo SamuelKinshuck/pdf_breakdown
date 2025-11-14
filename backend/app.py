@@ -381,6 +381,26 @@ def download(filename):
                                mimetype="text/csv; charset=utf-8",
                                as_attachment=True)
 
+@app.route("/api/init_from_sharepoint", methods = ["POST"])
+def init_from_sharepoint():
+    data = request.get_json(force=True)
+    print(data)
+    return {
+        'success': True,
+        'pdf_file': {
+            'success': True,
+            'filename': 'some_file.pdf',
+            'page_count': 10,
+            'file_id': 'aaa',
+            },
+        'prompt': {
+            'role': 'Role',
+            'task': 'Task',
+            'context': 'context',
+            'format': 'format',
+            'constraints': 'constraints'
+        }
+    } 
 
 
 @app.route("/api/context", methods=["POST"])

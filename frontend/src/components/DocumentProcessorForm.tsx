@@ -78,13 +78,17 @@ const DocumentProcessorForm: React.FC = () => {
   // Parse query params from the current URL
   const searchParams = new URLSearchParams(window.location.search);
 
-  const pdfPath = searchParams.get('pdfPath');
-  const xlsxPath = searchParams.get('xlsxPath');
+  const folderName = searchParams.get('folderName');
+  const xlsxFilename = searchParams.get('xlsxFilename');
+  const siteName = searchParams.get('siteName')
+  const pdfFilename = searchParams.get('pdfFilename')
   const sheet = searchParams.get('sheet');
-  const range = searchParams.get('range');
+  const row = searchParams.get('row');
+  const column = searchParams.get('column')
+  console.log('Folder Name FROM URL: ', folderName)
 
   // Only do the special flow if we actually have the SharePoint parameters
-  if (!pdfPath || !xlsxPath) {
+  if (!folderName || !xlsxFilename || !pdfFilename || !siteName) {
     return;
   }
 
@@ -95,14 +99,17 @@ const DocumentProcessorForm: React.FC = () => {
 
   const initFromSharepoint = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}init_from_sharepoint`, {
+      const response = await fetch(`${BACKEND_URL}api/init_from_sharepoint`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          pdf_path: pdfPath,
-          xlsx_path: xlsxPath,
+          folderName,
+          siteName,
           sheet,
-          range
+          row,
+          column,
+          xlsxFilename,
+          pdfFilename
         })
       });
 
@@ -498,6 +505,17 @@ const DocumentProcessorForm: React.FC = () => {
     fontStyle: 'italic'
   };
 
+  if(initError) {
+    <p
+            style={{
+              marginTop: '20px',
+              color: colors.tertiary.red,
+              fontSize: '14px'
+            }}
+          >
+            ⚠️ {initError}
+          </p>
+  }
   if (isInitializing) {
     return (
       <div
@@ -553,17 +571,6 @@ const DocumentProcessorForm: React.FC = () => {
           />
         </div>
 
-        {initError && (
-          <p
-            style={{
-              marginTop: '20px',
-              color: colors.tertiary.red,
-              fontSize: '14px'
-            }}
-          >
-            ⚠️ {initError}
-          </p>
-        )}
       </div>
     );
   }
