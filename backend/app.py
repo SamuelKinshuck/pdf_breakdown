@@ -50,7 +50,8 @@ from backend.sharepoint import (
     sharepoint_folder_exists,
     sharepoint_file_exists,
     sharepoint_export_df_to_csv,
-    sharepoint_delete_file_by_path
+    sharepoint_delete_file_by_path,
+    sharepoint_import_excel
 )
 from backend.database import (
     save_prompt,
@@ -242,11 +243,11 @@ def pdf_pages_to_images(pdf_path: Path, selected_pages: List, dpi: int = 200) ->
     doc.close()
     return paths
 
-def _images_from_df_path(pdf_path: str,
+def _images_from_pdf_path(pdf_path: str,
                          selected_pages: List[int]) -> Dict[int, str]:
     import tempfile, base64
     from pathlib import Path
-    print(f"[_images_from_df_path] Starting image generation for {len(selected_pages)} pages from {pdf_path}")
+    print(f"[_images_from_pdf_path] Starting image generation for {len(selected_pages)} pages from {pdf_path}")
     doc = None
     temp_dir = None
     try:
@@ -263,7 +264,7 @@ def _images_from_df_path(pdf_path: str,
 
         for page_number in pages_to_render:
             try:
-                print(f"[_images_from_df_path] Rendering page {page_number}...")
+                print(f"[_images_from_pdf_path] Rendering page {page_number}...")
                 page = doc[page_number - 1]
                 pix = page.get_pixmap(matrix=mtx)
 
@@ -276,21 +277,21 @@ def _images_from_df_path(pdf_path: str,
                 data_url = f"data:image/png;base64,{b64}"  # <-- PNG mime
 
                 page_images_for_gpt[page_number] = data_url
-                print(f"[_images_from_df_path] Page {page_number} rendered successfully (base64 chars: {len(b64)})")
+                print(f"[_images_from_pdf_path] Page {page_number} rendered successfully (base64 chars: {len(b64)})")
             except Exception as e:
-                print(f"[_images_from_df_path] Error rasterizing page {page_number}: {e}")
+                print(f"[_images_from_pdf_path] Error rasterizing page {page_number}: {e}")
                 page_images_for_gpt[page_number] = None
 
-        print(f"[_images_from_df_path] Completed image generation for {len(page_images_for_gpt)} pages")
+        print(f"[_images_from_pdf_path] Completed image generation for {len(page_images_for_gpt)} pages")
         return page_images_for_gpt
     finally:
         if doc is not None:
             doc.close()
-            print(f"[_images_from_df_path] PDF document closed")
+            print(f"[_images_from_pdf_path] PDF document closed")
         if temp_dir and temp_dir.exists():
             import shutil
             shutil.rmtree(temp_dir, ignore_errors=True)
-            print(f"[_images_from_df_path] Cleaned up temporary directory")
+            print(f"[_images_from_pdf_path] Cleaned up temporary directory")
 
 
 def _pdf_path_for_file_id(file_id: str) -> str:
@@ -381,6 +382,198 @@ def download(filename):
                                mimetype="text/csv; charset=utf-8",
                                as_attachment=True)
 
+@app.route("/api/init_from_sharepoint", methods=["POST"])
+def init_from_sharepoint():
+    """
+    Initialise the frontend as if the user had:
+      1) Uploaded a document via /upload
+      2) Manually filled in the prompt fields.
+
+    We:
+      • Read the prompt cells from an Excel file on SharePoint.
+      • Download the (PDF/DOCX/PPTX) file from SharePoint into UPLOAD_ROOT,
+        convert/normalise it to uploads/<file_id>/document.pdf,
+        and count pages exactly like /upload.
+      • Return a response that matches FileUploadResponse + prompt fields.
+    """
+    try:
+        data = request.get_json(force=True)
+
+        # ---- 1. Basic parameters & defaults ---------------------------------
+        folderName   = data.get("folderName")
+        xlsxFilename = data.get("xlsxFilename")
+        pdfFilename  = data.get("pdfFilename")
+        sheet        = data.get("sheet")
+        row          = data.get("row")
+        column       = data.get("column")
+
+        if not (folderName and xlsxFilename and pdfFilename):
+            return jsonify({
+                "success": False,
+                "error": "folderName, xlsxFilename and pdfFilename are required"
+            }), 400
+
+        # These defaults mirror the rest of your app
+        siteName = data.get("siteName", "GADOpportunitiesandSolutions")
+        tenant   = data.get("tenant", "tris42.onmicrosoft.com")
+        client_id = data.get("client_id", "d44a05d5-c6a5-4bbb-82d2-443123722380")
+
+        # Convert row/column to integers (assumed 0-based indices for iloc)
+        try:
+            #switch from 1 indexing in excel to 0 indexing in python
+            row_idx = int(row)-1 if row is not None else 0
+            col_idx = int(column)-1 if column is not None else 0
+        except ValueError:
+            return jsonify({
+                "success": False,
+                "error": "row and column must be integers"
+            }), 400
+
+        # ---- 2. Create SharePoint context -----------------------------------
+        sp_site_url = f"https://tris42.sharepoint.com/sites/{siteName}/"
+        ctx = sharepoint_create_context(sp_site_url, tenant, client_id)
+
+        # Build file URLs/paths as used elsewhere in your app
+        xlsx_filepath = folderName + "/" + xlsxFilename
+        pdf_filepath  = folderName + "/" + pdfFilename
+        
+
+        # ---- 3. Read prompt slice from Excel --------------------------------
+        try:
+            custom_function = lambda x: pd.read_excel(x, sheet_name = sheet, header = None)
+            df = sharepoint_import_excel(ctx, xlsx_filepath, custom_function = custom_function)
+            for i in range(100):
+                print('~' * 10)
+            print(sheet)
+            print(df)
+        except Exception as e:
+            tb = traceback.format_exc()
+            print("!" * 80)
+            print("Error importing Excel from SharePoint in init_from_sharepoint")
+            print(tb)
+            return jsonify({
+                "success": False,
+                "error": f"Failed to import Excel from SharePoint: {e}"
+            }), 500
+
+        # We expect 5 consecutive rows: [role, task, context, format, constraints]
+        try:
+            slice_vals = df.iloc[row_idx:row_idx + 5, col_idx].tolist()
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "error": f"Failed to read prompt cells from Excel: {e}"
+            }), 500
+
+        # Ensure we always have 5 items, pad with empty strings if needed
+        while len(slice_vals) < 5:
+            slice_vals.append("")
+
+        role_val        = slice_vals[0]
+        task_val        = slice_vals[1]
+        context_val     = slice_vals[2]
+        format_val      = slice_vals[3]
+        constraints_val = slice_vals[4]
+
+        # ---- 4. Download the file from SharePoint into uploads/ ------------
+
+        # We'll create a new upload_id and directory, exactly like /upload
+        upload_id = str(uuid.uuid4())
+        dest_dir = UPLOAD_ROOT / upload_id
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        original_ext = Path(pdfFilename).suffix.lower() or ".pdf"
+        original_path = dest_dir / f"original{original_ext}"
+        canonical_pdf = dest_dir / "document.pdf"
+
+        def _save_pdf_from_stream(file_stream):
+            """
+            custom_function for sharepoint_import_excel:
+            receives a BytesIO, writes it to original_path, and also
+            copies it as document.pdf. The return value is ignored.
+            """
+            try:
+                file_stream.seek(0)
+                with open(original_path, "wb") as f:
+                    f.write(file_stream.read())
+                # Normalise name to document.pdf so the rest of the pipeline
+                # behaves exactly like the manual /upload path.
+                shutil.copy2(str(original_path), str(canonical_pdf))
+            except Exception as e_inner:
+                print("Error saving PDF from SharePoint stream:", e_inner)
+                raise
+            return True  # value unused; sharepoint_import_excel just returns it
+
+        try:
+            # Despite the name, sharepoint_import_excel just downloads the file
+            # and passes the BytesIO to custom_function when provided.
+            sharepoint_import_excel(
+                ctx,
+                pdf_filepath,
+                sheet=None,
+                custom_function=_save_pdf_from_stream
+            )
+        except Exception as e:
+            shutil.rmtree(dest_dir, ignore_errors=True)
+            tb = traceback.format_exc()
+            print("!" * 80)
+            print("Error downloading PDF from SharePoint in init_from_sharepoint")
+            print(tb)
+            return jsonify({
+                "success": False,
+                "error": f"Failed to download PDF from SharePoint: {e}"
+            }), 500
+
+        if not canonical_pdf.exists():
+            shutil.rmtree(dest_dir, ignore_errors=True)
+            return jsonify({
+                "success": False,
+                "error": "Downloaded PDF file not found after saving"
+            }), 500
+
+        try:
+            with open(str(canonical_pdf), "rb") as f:
+                page_count = len(PdfReader(f).pages)
+        except Exception as e:
+            shutil.rmtree(dest_dir, ignore_errors=True)
+            tb = traceback.format_exc()
+            print("!" * 80)
+            print("Error counting PDF pages in init_from_sharepoint")
+            print(tb)
+            return jsonify({
+                "success": False,
+                "error": f"Failed to read PDF pages: {e}"
+            }), 500
+
+        # ---------------------------------------------------------------------
+        # 5. Return response identical in shape to manual upload + prompts
+        # ---------------------------------------------------------------------
+        return jsonify({
+            "success": True,
+            "pdf_file": {
+                "success": True,
+                "filename": pdfFilename,
+                "page_count": page_count,
+                "file_id": upload_id,
+            },
+            "prompt": {
+                "role":        role_val if role_val is not None else "",
+                "task":        task_val if task_val is not None else "",
+                "context":     context_val if context_val is not None else "",
+                "format":      format_val if format_val is not None else "",
+                "constraints": constraints_val if constraints_val is not None else "",
+            }
+        }), 200
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        print("!" * 80)
+        print("Unhandled error in init_from_sharepoint")
+        print(tb)
+        return jsonify({
+            "success": False,
+            "error": str(e)
+        }), 500
 
 
 @app.route("/api/context", methods=["POST"])
@@ -784,7 +977,7 @@ def process_page():
         
         # Generate image for this specific page
         img_paths = pdf_pages_to_images(Path(pdf_path), [int(page_number)])
-        images_for_gpt = _images_from_df_path(pdf_path, [page_number])
+        images_for_gpt = _images_from_pdf_path(pdf_path, [page_number])
         pre_compiled_image = images_for_gpt.get(page_number)
         
         if pre_compiled_image is None:
