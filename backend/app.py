@@ -375,6 +375,21 @@ def allowed_file(filename):
         '.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+import math
+
+def normalize(value):
+    # None → ""
+    if value is None:
+        return ""
+    # NaN (float('nan'), numpy.nan, etc.) → ""
+    try:
+        if isinstance(value, float) and math.isnan(value):
+            return ""
+    except TypeError:
+        pass
+    return value
+
+
 @app.route('/download/<path:filename>', methods=['GET'])
 def download(filename):
     return send_from_directory(app.config['UPLOAD_FOLDER'],
@@ -554,21 +569,21 @@ def init_from_sharepoint():
         # ---------------------------------------------------------------------
         print('returning info to the backend')
         return jsonify({
-            "success": True,
-            "pdf_file": {
                 "success": True,
-                "filename": pdfFilename,
-                "page_count": page_count,
-                "file_id": upload_id,
-            },
-            "prompt": {
-                "role":        role_val if role_val is not None else "",
-                "task":        task_val if task_val is not None else "",
-                "context":     context_val if context_val is not None else "",
-                "format":      format_val if format_val is not None else "",
-                "constraints": constraints_val if constraints_val is not None else "",
-            }
-        }), 200
+                "pdf_file": {
+                    "success": True,
+                    "filename": normalize(pdfFilename),
+                    "page_count": page_count,
+                    "file_id": normalize(upload_id),
+                },
+                "prompt": {
+                    "role":        normalize(role_val),
+                    "task":        normalize(task_val),
+                    "context":     normalize(context_val),
+                    "format":      normalize(format_val),
+                    "constraints": normalize(constraints_val),
+                }
+            }), 200
 
     except Exception as e:
         tb = traceback.format_exc()
