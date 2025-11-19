@@ -125,6 +125,7 @@ const DocumentProcessorForm: React.FC = () => {
       }
 
       // 1) Pretend the PDF has been uploaded (so page selection etc. works)
+      console.log('got pdf file')
       setFileInfo(data.pdf_file);
 
       // 2) Fill in the prompt fields
@@ -135,12 +136,13 @@ const DocumentProcessorForm: React.FC = () => {
         context: data.prompt.context || '',
         format: data.prompt.format || '',
         constraints: data.prompt.constraints || '',
-        // Optional: auto-select all pages by default
         selectedPages: Array.from(
           { length: data.pdf_file.page_count },
           (_, i) => i + 1
         )
       }));
+      console.log('info returned from backend is: ')
+      console.log(data)
 
       setInitializedFromUrl(true);
     } catch (err: any) {
@@ -253,7 +255,6 @@ const DocumentProcessorForm: React.FC = () => {
       }
 
       const data = (await response.json()) as FileUploadResponse;
-      console.log('xxx');
 
       setFileInfo(data);
       setFormData(prev => ({ ...prev, file }));

@@ -22,7 +22,7 @@ if subscription_key:
             azure_endpoint="https://oaigad.openai.azure.com/",
             api_version="2024-12-01-preview",
             max_retries=0,
-            timeout=httpx.Timeout(30.0, read=30.0, write=30.0, pool=30.0)
+            timeout=httpx.Timeout(300.0, read=300.0, write=300.0, pool=300.0)
         )
     except Exception as e:
         print(f"Warning: Failed to initialize Azure OpenAI client: {e}")
@@ -94,7 +94,7 @@ def get_response_from_chatgpt_simple(system_prompt: str, user_prompt: str, model
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        temperature=0
+        #temperature=0
     )
     return response.choices[0].message.content
 

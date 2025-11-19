@@ -436,16 +436,14 @@ def init_from_sharepoint():
         # Build file URLs/paths as used elsewhere in your app
         xlsx_filepath = folderName + "/" + xlsxFilename
         pdf_filepath  = folderName + "/" + pdfFilename
+        print(f'pdf filepath: {pdf_filepath}')
         
 
         # ---- 3. Read prompt slice from Excel --------------------------------
         try:
             custom_function = lambda x: pd.read_excel(x, sheet_name = sheet, header = None)
             df = sharepoint_import_excel(ctx, xlsx_filepath, custom_function = custom_function)
-            for i in range(100):
-                print('~' * 10)
-            print(sheet)
-            print(df)
+
         except Exception as e:
             tb = traceback.format_exc()
             print("!" * 80)
@@ -459,6 +457,10 @@ def init_from_sharepoint():
         # We expect 5 consecutive rows: [role, task, context, format, constraints]
         try:
             slice_vals = df.iloc[row_idx:row_idx + 5, col_idx].tolist()
+            for i in range(100):
+                print('~' * 10)
+                print('slice_vals')
+                print(slice_vals)
         except Exception as e:
             return jsonify({
                 "success": False,
@@ -513,6 +515,7 @@ def init_from_sharepoint():
                 sheet=None,
                 custom_function=_save_pdf_from_stream
             )
+            print('successfully imported pdf from sharepoint')
         except Exception as e:
             shutil.rmtree(dest_dir, ignore_errors=True)
             tb = traceback.format_exc()
@@ -534,6 +537,7 @@ def init_from_sharepoint():
         try:
             with open(str(canonical_pdf), "rb") as f:
                 page_count = len(PdfReader(f).pages)
+                print(f'The pdf has {page_count} pages')
         except Exception as e:
             shutil.rmtree(dest_dir, ignore_errors=True)
             tb = traceback.format_exc()
@@ -548,6 +552,7 @@ def init_from_sharepoint():
         # ---------------------------------------------------------------------
         # 5. Return response identical in shape to manual upload + prompts
         # ---------------------------------------------------------------------
+        print('returning info to the backend')
         return jsonify({
             "success": True,
             "pdf_file": {
