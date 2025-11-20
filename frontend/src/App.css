@@ -1,5 +1,6 @@
 .App {
-  text-align: center;
+  background-image: url('./assets/content.jpg');
+  text-align: center
 }
 
 .App-logo {
@@ -10,6 +11,15 @@
 @media (prefers-reduced-motion: no-preference) {
   .App-logo {
     animation: App-logo-spin infinite 20s linear;
+  }
+}
+
+@keyframes loadingBar {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(100%);
   }
 }
 

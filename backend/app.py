@@ -421,6 +421,9 @@ def init_from_sharepoint():
         sheet        = data.get("sheet")
         row          = data.get("row")
         column       = data.get("column")
+        forceError   = data.get('forceError')
+        if forceError:
+            a = 1 + 'a'
 
         if not (folderName and xlsxFilename and pdfFilename):
             return jsonify({
@@ -474,8 +477,8 @@ def init_from_sharepoint():
             slice_vals = df.iloc[row_idx:row_idx + 5, col_idx].tolist()
             for i in range(100):
                 print('~' * 10)
-                print('slice_vals')
-                print(slice_vals)
+            print('slice_vals')
+            print(slice_vals)
         except Exception as e:
             return jsonify({
                 "success": False,

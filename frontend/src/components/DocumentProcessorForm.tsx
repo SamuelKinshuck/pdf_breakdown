@@ -7,6 +7,7 @@ import ProcessingDetailsModal from './ProcessingDetailsModal';
 import SavePromptModal, { SavePromptData } from './SavePromptModal';
 import SearchPromptsModal, { SavedPrompt } from './SearchPromptsModal';
 import { BACKEND_URL } from '../apiConfig';
+import AI from '../assets/ai.png'
 
 interface InitFromSharepointResponse {
   success: boolean;
@@ -85,10 +86,14 @@ const DocumentProcessorForm: React.FC = () => {
   const sheet = searchParams.get('sheet');
   const row = searchParams.get('row');
   const column = searchParams.get('column')
+  const forceError = searchParams.get('forceError')
   console.log('Folder Name FROM URL: ', folderName)
 
   // Only do the special flow if we actually have the SharePoint parameters
   if (!folderName || !xlsxFilename || !pdfFilename || !siteName) {
+    if(folderName || xlsxFilename || pdfFilename || siteName) {
+      setInitError("Some needed parameters were not provided")
+    }
     return;
   }
 
@@ -109,7 +114,8 @@ const DocumentProcessorForm: React.FC = () => {
           row,
           column,
           xlsxFilename,
-          pdfFilename
+          pdfFilename,
+          forceError
         })
       });
 
@@ -121,6 +127,7 @@ const DocumentProcessorForm: React.FC = () => {
       const data = (await response.json()) as InitFromSharepointResponse;
 
       if (!data.success) {
+        console.log('xxxxx')
         throw new Error(data.error || 'Failed to initialise from SharePoint.');
       }
 
@@ -147,6 +154,7 @@ const DocumentProcessorForm: React.FC = () => {
       setInitializedFromUrl(true);
     } catch (err: any) {
       console.error('Init from SharePoint error:', err);
+      console.log('setting init error', err.message || 'Failed to load data from SharePoint URL.')
       setInitError(err.message || 'Failed to load data from SharePoint URL.');
     } finally {
       setIsInitializing(false);
@@ -507,17 +515,20 @@ const DocumentProcessorForm: React.FC = () => {
   };
 
   if(initError) {
-    <p
+    return(<p
             style={{
               marginTop: '20px',
               color: colors.tertiary.red,
-              fontSize: '14px'
+              fontSize: '20px',
+              background: 'white',
+              padding: '20px'
             }}
           >
-            ⚠️ {initError}
-          </p>
+            ⚠️ Error getting information from sharepoint: {initError}
+          </p>)
   }
-  if (isInitializing) {
+
+if (isInitializing) {
     return (
       <div
         style={{
@@ -525,10 +536,10 @@ const DocumentProcessorForm: React.FC = () => {
           padding: '40px',
           maxWidth: '800px',
           margin: '80px auto',
-          backgroundColor: colors.primary.offWhite,
           borderRadius: '20px',
-          boxShadow: `0 12px 40px ${colors.tertiary.blueGrey}25`,
-          textAlign: 'center'
+          textAlign: 'center',
+          backgroundColor: "rgb(197, 239, 247)",
+          boxShadow: "rgb(60 129 167 / 14%) 30px 30px 40px"
         }}
       >
         <h2
@@ -538,16 +549,19 @@ const DocumentProcessorForm: React.FC = () => {
             marginBottom: '16px'
           }}
         >
-          Please wait while we access the information from your files…
+          Please wait while I access the information from your files…
         </h2>
+        <img src = {AI} alt = {'Image of GADSBY'} style = {{'maxWidth' : '300px'}}/> 
         <p
           style={{
             color: colors.tertiary.blueGrey,
-            fontSize: '14px',
+            fontSize: '18px',
             marginBottom: '16px'
           }}
         >
-          We’re retrieving your PDF and prompt configuration from SharePoint.
+          I am retrieving your PDF and prompt configuration from SharePoint.
+          It might take a minute.
+          If there is a problem, I will show an error message here.
         </p>
 
         {/* Simple loader bar */}
@@ -576,15 +590,16 @@ const DocumentProcessorForm: React.FC = () => {
     );
   }
 
+
   return (
     <form onSubmit={handleSubmit} style={{ 
       fontFamily: 'system-ui, -apple-system, sans-serif',
       padding: '40px',
       maxWidth: '1400px',
       margin: '0 auto',
-      backgroundColor: colors.primary.offWhite,
+      backgroundColor: "rgba(249, 249, 253, 0.9)",
       borderRadius: '20px',
-      boxShadow: `0 12px 40px ${colors.tertiary.blueGrey}25`
+      boxShadow: "rgba(0, 33, 46, 0.3) 0px 8px 32px"
     }}>
       {/* Prompt Configuration Section */}
       <CollapsibleSection
@@ -678,7 +693,7 @@ const DocumentProcessorForm: React.FC = () => {
               e.target.style.boxShadow = 'none';
             }}
           />
-          <div style={helperTextStyle}>Background information, constraints, or relevant details</div>
+          <div style={helperTextStyle}>Background information or relevant details</div>
         </CollapsibleSection>
 
         {/* Format */}
