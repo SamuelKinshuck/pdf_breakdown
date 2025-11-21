@@ -423,7 +423,7 @@ def init_from_sharepoint():
         column       = data.get("column")
         forceError   = data.get('forceError')
         if forceError:
-            a = 1 + 'a'
+            raise ValueError("Testing What happens when we force an error")
 
         if not (folderName and xlsxFilename and pdfFilename):
             return jsonify({

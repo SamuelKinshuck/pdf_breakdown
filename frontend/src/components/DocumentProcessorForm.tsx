@@ -8,6 +8,7 @@ import SavePromptModal, { SavePromptData } from './SavePromptModal';
 import SearchPromptsModal, { SavedPrompt } from './SearchPromptsModal';
 import { BACKEND_URL } from '../apiConfig';
 import AI from '../assets/ai.png'
+import PromptSummaryCompact from './PromptSummaryCompact';
 
 interface InitFromSharepointResponse {
   success: boolean;
@@ -47,7 +48,7 @@ const DocumentProcessorForm: React.FC = () => {
     context: '',
     format: '',
     constraints: '',
-    temperature: 0.5,
+    temperature: 0,
     model: 'GPT-4.1',
     file: null,
     selectedPages: []
@@ -76,28 +77,98 @@ const DocumentProcessorForm: React.FC = () => {
   };
 
   useEffect(() => {
-  // Parse query params from the current URL
   const searchParams = new URLSearchParams(window.location.search);
 
-  const folderName = searchParams.get('folderName');
-  const xlsxFilename = searchParams.get('xlsxFilename');
-  const siteName = searchParams.get('siteName')
-  const pdfFilename = searchParams.get('pdfFilename')
-  const sheet = searchParams.get('sheet');
-  const row = searchParams.get('row');
-  const column = searchParams.get('column')
-  const forceError = searchParams.get('forceError')
-  console.log('Folder Name FROM URL: ', folderName)
+  const folderName = searchParams.get('folderName')?.trim() || null;
+  const xlsxFilename = searchParams.get('xlsxFilename')?.trim() || null;
+  const siteName = searchParams.get('siteName')?.trim() || null;
+  const pdfFilename = searchParams.get('pdfFilename')?.trim() || null;
 
-  // Only do the special flow if we actually have the SharePoint parameters
+  const sheet = searchParams.get('sheet') ?? undefined; // pass-through
+  const forceError = searchParams.get('forceError') ?? undefined; // optional
+  const model = (searchParams.get('model')?.trim() || 'GPT-4.1');
+
+  const rawRow = searchParams.get('row');
+  const rawColumn = searchParams.get('column');
+  const rawTemperature = searchParams.get('temperature');
+
+  // ---- helpers ----
+  const sanitiseTemperature = (raw: string | null | undefined): number | 'error' => {
+    if (raw == null || raw.trim() === '') return 0; // default
+    const s = raw.trim().replace(',', '.');
+
+    // percentage with % sign
+    if (/%$/.test(s)) {
+      const n = parseFloat(s.slice(0, -1));
+      if (!Number.isFinite(n)) return 'error';
+      const t = n / 100;
+      return t >= 0 && t <= 1 ? t : 'error';
+    }
+
+    // plain number
+    const n = parseFloat(s);
+    if (!Number.isFinite(n)) return 'error';
+
+    // If looks like 0–100 without %, treat as percent; else expect 0–1
+    if (n > 1) {
+      // treat 1–100 as percentage, otherwise invalid
+      if (n <= 100) {
+        const t = n / 100;
+        return t >= 0 && t <= 1 ? t : 'error';
+      }
+      return 'error';
+    }
+
+    return n >= 0 && n <= 1 ? n : 'error';
+  };
+
+  const sanitiseIntegerish = (
+    raw: string | null,
+    fieldName: 'row' | 'column'
+  ): number | undefined | 'error' => {
+    if (raw == null || raw.trim() === '') return undefined; // optional
+    const s = raw.trim().replace(',', '.'); // tolerate comma decimals
+    const n = Number(s);
+    if (!Number.isFinite(n)) return 'error';
+    // Round to nearest integer (e.g., 3.0 -> 3, 5.6 -> 6)
+    const int = Math.round(n);
+    return int;
+  };
+
+  // ---- validate required presence first ----
   if (!folderName || !xlsxFilename || !pdfFilename || !siteName) {
-    if(folderName || xlsxFilename || pdfFilename || siteName) {
-      setInitError("Some needed parameters were not provided")
+    if (folderName || xlsxFilename || pdfFilename || siteName) {
+      setInitError('Some needed parameters were not provided.');
     }
     return;
   }
 
-  // Start init state
+  // ---- sanitise fields ----
+  const errors: string[] = [];
+
+  const temperature = sanitiseTemperature(rawTemperature);
+  if (temperature === 'error') {
+    errors.push(
+      `Invalid temperature "${rawTemperature ?? ''}". Use a number 0–1, a percentage like "70%", or 0–100 (treated as %).`
+    );
+  }
+
+  const row = sanitiseIntegerish(rawRow, 'row');
+  if (row === 'error') {
+    errors.push(`Invalid row "${rawRow ?? ''}". Must be a number (will be rounded to an integer).`);
+  }
+
+  const column = sanitiseIntegerish(rawColumn, 'column');
+  if (column === 'error') {
+    errors.push(`Invalid column "${rawColumn ?? ''}". Must be a number (will be rounded to an integer).`);
+  }
+
+  if (errors.length > 0) {
+    setInitError(`Cannot sanitise URL parameters: ${errors.join(' ')}`);
+    return;
+  }
+
+  // ---- proceed with initialisation ----
   setIsInitializing(true);
   setInitError(null);
   setUploadError('');
@@ -111,8 +182,8 @@ const DocumentProcessorForm: React.FC = () => {
           folderName,
           siteName,
           sheet,
-          row,
-          column,
+          row: row as number | undefined,
+          column: column as number | undefined,
           xlsxFilename,
           pdfFilename,
           forceError
@@ -127,15 +198,11 @@ const DocumentProcessorForm: React.FC = () => {
       const data = (await response.json()) as InitFromSharepointResponse;
 
       if (!data.success) {
-        console.log('xxxxx')
         throw new Error(data.error || 'Failed to initialise from SharePoint.');
       }
 
-      // 1) Pretend the PDF has been uploaded (so page selection etc. works)
-      console.log('got pdf file')
       setFileInfo(data.pdf_file);
 
-      // 2) Fill in the prompt fields
       setFormData(prev => ({
         ...prev,
         role: data.prompt.role || '',
@@ -143,18 +210,17 @@ const DocumentProcessorForm: React.FC = () => {
         context: data.prompt.context || '',
         format: data.prompt.format || '',
         constraints: data.prompt.constraints || '',
+        temperature: temperature as number,
+        model: String(model),
         selectedPages: Array.from(
           { length: data.pdf_file.page_count },
           (_, i) => i + 1
         )
       }));
-      console.log('info returned from backend is: ')
-      console.log(data)
 
       setInitializedFromUrl(true);
     } catch (err: any) {
       console.error('Init from SharePoint error:', err);
-      console.log('setting init error', err.message || 'Failed to load data from SharePoint URL.')
       setInitError(err.message || 'Failed to load data from SharePoint URL.');
     } finally {
       setIsInitializing(false);
@@ -602,304 +668,342 @@ if (isInitializing) {
       boxShadow: "rgba(0, 33, 46, 0.3) 0px 8px 32px"
     }}>
       {/* Prompt Configuration Section */}
-      <CollapsibleSection
-        title="⚙️ Prompt Configuration"
-        isExpanded={promptConfigExpanded}
-        onToggle={() => setPromptConfigExpanded(!promptConfigExpanded)}
-      >
-        {/* Role */}
-        <CollapsibleSection
-          title="👤 Role"
-          isExpanded={promptSectionsExpanded.role}
-          onToggle={() => togglePromptSection('role')}
-          isSubSection={true}
-        >
-          <textarea
-            key = {'RoleText'}
-            value={formData.role}
-            onChange={(e) => handleInputChange('role', e.target.value)}
-            rows={4}
-            style={{
-              ...inputStyle,
-              resize: 'vertical' as const,
-              minHeight: '100px'
-            }}
-            placeholder="Define the role or persona for the AI assistant..."
-            onFocus={(e) => {
-              e.target.style.borderColor = colors.tertiary.blue;
-              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-            }}
-            onBlur={(e) => {
-              e.target.style.borderColor = colors.primary.lightBlue;
-              e.target.style.boxShadow = 'none';
-            }}
-          />
-          <div style={helperTextStyle}>Specify the persona, expertise level, and perspective for the AI</div>
-        </CollapsibleSection>
+      {initializedFromUrl ? (
+        <PromptSummaryCompact
+          prompt={{
+            role: formData.role,
+            task: formData.task,
+            context: formData.context,
+            format: formData.format,
+            constraints: formData.constraints,
+            temperature: formData.temperature,
+            model: formData.model
+          }}
+          colors={colors}
+        />
+      ) :
+            <>
+            <CollapsibleSection
+              title="⚙️ Prompt Configuration"
+              isExpanded={promptConfigExpanded}
+              onToggle={() => setPromptConfigExpanded(!promptConfigExpanded)}
+            >
+              {/* Role */}
+              <CollapsibleSection
+                title="👤 Role"
+                isExpanded={promptSectionsExpanded.role}
+                onToggle={() => togglePromptSection('role')}
+                isSubSection={true}
+              >
+                <textarea
+                  key = {'RoleText'}
+                  value={formData.role}
+                  onChange={(e) => handleInputChange('role', e.target.value)}
+                  rows={4}
+                  style={{
+                    ...inputStyle,
+                    resize: 'vertical' as const,
+                    minHeight: '100px'
+                  }}
+                  placeholder="Define the role or persona for the AI assistant..."
+                  onFocus={(e) => {
+                    e.target.style.borderColor = colors.tertiary.blue;
+                    e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = colors.primary.lightBlue;
+                    e.target.style.boxShadow = 'none';
+                  }}
+                />
+                <div style={helperTextStyle}>Specify the persona, expertise level, and perspective for the AI</div>
+              </CollapsibleSection>
 
-        {/* Task */}
-        <CollapsibleSection
-          title="📋 Task"
-          isExpanded={promptSectionsExpanded.task}
-          onToggle={() => togglePromptSection('task')}
-          isSubSection={true}
-        >
-          <textarea
-            key = {'TaskText'}
-            value={formData.task}
-            onChange={(e) => handleInputChange('task', e.target.value)}
-            rows={4}
-            style={{
-              ...inputStyle,
-              resize: 'vertical' as const,
-              minHeight: '100px'
-            }}
-            placeholder="Describe the specific task to be performed..."
-            onFocus={(e) => {
-              e.target.style.borderColor = colors.tertiary.blue;
-              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-            }}
-            onBlur={(e) => {
-              e.target.style.borderColor = colors.primary.lightBlue;
-              e.target.style.boxShadow = 'none';
-            }}
-          />
-          <div style={helperTextStyle}>Clear, specific description of what you want accomplished</div>
-        </CollapsibleSection>
+              {/* Task */}
+              <CollapsibleSection
+                title="📋 Task"
+                isExpanded={promptSectionsExpanded.task}
+                onToggle={() => togglePromptSection('task')}
+                isSubSection={true}
+              >
+                <textarea
+                  key = {'TaskText'}
+                  value={formData.task}
+                  onChange={(e) => handleInputChange('task', e.target.value)}
+                  rows={4}
+                  style={{
+                    ...inputStyle,
+                    resize: 'vertical' as const,
+                    minHeight: '100px'
+                  }}
+                  placeholder="Describe the specific task to be performed..."
+                  onFocus={(e) => {
+                    e.target.style.borderColor = colors.tertiary.blue;
+                    e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = colors.primary.lightBlue;
+                    e.target.style.boxShadow = 'none';
+                  }}
+                />
+                <div style={helperTextStyle}>Clear, specific description of what you want accomplished</div>
+              </CollapsibleSection>
 
-        {/* Context */}
-        <CollapsibleSection
-          title="🔍 Context"
-          isExpanded={promptSectionsExpanded.context}
-          onToggle={() => togglePromptSection('context')}
-          isSubSection={true}
-        >
-          <textarea
-            value={formData.context}
-            onChange={(e) => handleInputChange('context', e.target.value)}
-            rows={4}
-            style={{
-              ...inputStyle,
-              resize: 'vertical' as const,
-              minHeight: '100px'
-            }}
-            placeholder="Provide relevant context and background information..."
-            onFocus={(e) => {
-              e.target.style.borderColor = colors.tertiary.blue;
-              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-            }}
-            onBlur={(e) => {
-              e.target.style.borderColor = colors.primary.lightBlue;
-              e.target.style.boxShadow = 'none';
-            }}
-          />
-          <div style={helperTextStyle}>Background information or relevant details</div>
-        </CollapsibleSection>
+              {/* Context */}
+              <CollapsibleSection
+                title="🔍 Context"
+                isExpanded={promptSectionsExpanded.context}
+                onToggle={() => togglePromptSection('context')}
+                isSubSection={true}
+              >
+                <textarea
+                  value={formData.context}
+                  onChange={(e) => handleInputChange('context', e.target.value)}
+                  rows={4}
+                  style={{
+                    ...inputStyle,
+                    resize: 'vertical' as const,
+                    minHeight: '100px'
+                  }}
+                  placeholder="Provide relevant context and background information..."
+                  onFocus={(e) => {
+                    e.target.style.borderColor = colors.tertiary.blue;
+                    e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = colors.primary.lightBlue;
+                    e.target.style.boxShadow = 'none';
+                  }}
+                />
+                <div style={helperTextStyle}>Background information or relevant details</div>
+              </CollapsibleSection>
 
-        {/* Format */}
-        <CollapsibleSection
-          title="📝 Format"
-          isExpanded={promptSectionsExpanded.format}
-          onToggle={() => togglePromptSection('format')}
-          isSubSection={true}
-        >
-          <textarea
-            value={formData.format}
-            onChange={(e) => handleInputChange('format', e.target.value)}
-            rows={4}
-            style={{
-              ...inputStyle,
-              resize: 'vertical' as const,
-              minHeight: '100px'
-            }}
-            placeholder="Specify the desired output format..."
-            onFocus={(e) => {
-              e.target.style.borderColor = colors.tertiary.blue;
-              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-            }}
-            onBlur={(e) => {
-              e.target.style.borderColor = colors.primary.lightBlue;
-              e.target.style.boxShadow = 'none';
-            }}
-          />
-          <div style={helperTextStyle}>Structure, style, length, or presentation requirements</div>
-        </CollapsibleSection>
+              {/* Format */}
+              <CollapsibleSection
+                title="📝 Format"
+                isExpanded={promptSectionsExpanded.format}
+                onToggle={() => togglePromptSection('format')}
+                isSubSection={true}
+              >
+                <textarea
+                  value={formData.format}
+                  onChange={(e) => handleInputChange('format', e.target.value)}
+                  rows={4}
+                  style={{
+                    ...inputStyle,
+                    resize: 'vertical' as const,
+                    minHeight: '100px'
+                  }}
+                  placeholder="Specify the desired output format..."
+                  onFocus={(e) => {
+                    e.target.style.borderColor = colors.tertiary.blue;
+                    e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = colors.primary.lightBlue;
+                    e.target.style.boxShadow = 'none';
+                  }}
+                />
+                <div style={helperTextStyle}>Structure, style, length, or presentation requirements</div>
+              </CollapsibleSection>
 
-        {/* Constraints */}
-        <CollapsibleSection
-          title="⚠️ Constraints"
-          isExpanded={promptSectionsExpanded.constraints}
-          onToggle={() => togglePromptSection('constraints')}
-          isSubSection={true}
-        >
-          <textarea
-            value={formData.constraints}
-            onChange={(e) => handleInputChange('constraints', e.target.value)}
-            rows={4}
-            style={{
-              ...inputStyle,
-              resize: 'vertical' as const,
-              minHeight: '100px'
-            }}
-            placeholder="Define any constraints or limitations..."
-            onFocus={(e) => {
-              e.target.style.borderColor = colors.tertiary.blue;
-              e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-            }}
-            onBlur={(e) => {
-              e.target.style.borderColor = colors.primary.lightBlue;
-              e.target.style.boxShadow = 'none';
-            }}
-          />
-          <div style={helperTextStyle}>Rules, limitations, or things to avoid</div>
-        </CollapsibleSection>
+              {/* Constraints */}
+              <CollapsibleSection
+                title="⚠️ Constraints"
+                isExpanded={promptSectionsExpanded.constraints}
+                onToggle={() => togglePromptSection('constraints')}
+                isSubSection={true}
+              >
+                <textarea
+                  value={formData.constraints}
+                  onChange={(e) => handleInputChange('constraints', e.target.value)}
+                  rows={4}
+                  style={{
+                    ...inputStyle,
+                    resize: 'vertical' as const,
+                    minHeight: '100px'
+                  }}
+                  placeholder="Define any constraints or limitations..."
+                  onFocus={(e) => {
+                    e.target.style.borderColor = colors.tertiary.blue;
+                    e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = colors.primary.lightBlue;
+                    e.target.style.boxShadow = 'none';
+                  }}
+                />
+                <div style={helperTextStyle}>Rules, limitations, or things to avoid</div>
+              </CollapsibleSection>
 
-        {/* Prompt Management Buttons */}
-        <div style={{
-          display: 'flex',
-          gap: '12px',
-          marginTop: '20px',
-          flexWrap: 'wrap'
-        }}>
-          <button
-            type="button"
-            onClick={() => setShowSavePromptModal(true)}
-            style={{
-              flex: '1',
-              minWidth: '200px',
-              padding: '14px 24px',
-              backgroundColor: colors.secondary.lilac,
-              color: colors.primary.white,
-              border: 'none',
-              borderRadius: '12px',
-              fontSize: '16px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              boxShadow: `0 4px 12px ${colors.secondary.lilac}40`
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = colors.secondary.darkPurple;
-              e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = `0 6px 16px ${colors.secondary.lilac}50`;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = colors.secondary.lilac;
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = `0 4px 12px ${colors.secondary.lilac}40`;
-            }}
-          >
-            💾 Save Prompts
-          </button>
+              {/* Prompt Management Buttons */}
+              <div style={{
+                display: 'flex',
+                gap: '12px',
+                marginTop: '20px',
+                flexWrap: 'wrap'
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setShowSavePromptModal(true)}
+                  style={{
+                    flex: '1',
+                    minWidth: '200px',
+                    padding: '14px 24px',
+                    backgroundColor: colors.secondary.lilac,
+                    color: colors.primary.white,
+                    border: 'none',
+                    borderRadius: '12px',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    boxShadow: `0 4px 12px ${colors.secondary.lilac}40`
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = colors.secondary.darkPurple;
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = `0 6px 16px ${colors.secondary.lilac}50`;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = colors.secondary.lilac;
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = `0 4px 12px ${colors.secondary.lilac}40`;
+                  }}
+                >
+                  💾 Save Prompts
+                </button>
 
-          <button
-            type="button"
-            onClick={() => setShowSearchPromptsModal(true)}
-            style={{
-              flex: '1',
-              minWidth: '200px',
-              padding: '14px 24px',
-              backgroundColor: colors.tertiary.blue,
-              color: colors.primary.white,
-              border: 'none',
-              borderRadius: '12px',
-              fontSize: '16px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              transition: 'all 0.2s ease',
-              boxShadow: `0 4px 12px ${colors.tertiary.blue}40`
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.backgroundColor = colors.tertiary.blueGrey;
-              e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = `0 6px 16px ${colors.tertiary.blue}50`;
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.backgroundColor = colors.tertiary.blue;
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = `0 4px 12px ${colors.tertiary.blue}40`;
-            }}
-          >
-            🔍 Search Saved Prompts
-          </button>
-        </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSearchPromptsModal(true)}
+                  style={{
+                    flex: '1',
+                    minWidth: '200px',
+                    padding: '14px 24px',
+                    backgroundColor: colors.tertiary.blue,
+                    color: colors.primary.white,
+                    border: 'none',
+                    borderRadius: '12px',
+                    fontSize: '16px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    boxShadow: `0 4px 12px ${colors.tertiary.blue}40`
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.backgroundColor = colors.tertiary.blueGrey;
+                    e.currentTarget.style.transform = 'translateY(-2px)';
+                    e.currentTarget.style.boxShadow = `0 6px 16px ${colors.tertiary.blue}50`;
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.backgroundColor = colors.tertiary.blue;
+                    e.currentTarget.style.transform = 'translateY(0)';
+                    e.currentTarget.style.boxShadow = `0 4px 12px ${colors.tertiary.blue}40`;
+                  }}
+                >
+                  🔍 Search Saved Prompts
+                </button>
+              </div>
 
-        {/* Success Message */}
-        {promptSaveSuccess && (
-          <div style={{
-            marginTop: '16px',
-            padding: '12px 16px',
-            backgroundColor: `${colors.secondary.green}20`,
-            color: colors.secondary.seaGreen,
-            borderRadius: '8px',
-            fontSize: '14px',
-            fontWeight: '600',
-            border: `2px solid ${colors.secondary.green}`,
-            animation: 'fadeIn 0.3s ease'
-          }}>
-            ✓ {promptSaveSuccess}
-          </div>
-        )}
-      </CollapsibleSection>
+              {/* Success Message */}
+              {promptSaveSuccess && (
+                <div style={{
+                  marginTop: '16px',
+                  padding: '12px 16px',
+                  backgroundColor: `${colors.secondary.green}20`,
+                  color: colors.secondary.seaGreen,
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  border: `2px solid ${colors.secondary.green}`,
+                  animation: 'fadeIn 0.3s ease'
+                }}>
+                  ✓ {promptSaveSuccess}
+                </div>
+              )}
+            </CollapsibleSection>
 
-      {/* Model Configuration Section */}
-      <CollapsibleSection
-        title="🤖 Model Configuration"
-        isExpanded={modelConfigExpanded}
-        onToggle={() => setModelConfigExpanded(!modelConfigExpanded)}
-      >
-        {/* Temperature */}
-        <div style={{ marginBottom: '32px' }}>
-          <label style={labelStyle}>🌡️ Temperature: {formData.temperature}</label>
-          <div style={helperTextStyle}>Controls randomness: 0 = focused, 1 = creative</div>
-          <div style={{ position: 'relative', marginTop: '8px' }}>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              value={formData.temperature}
-              onChange={(e) => handleInputChange('temperature', parseFloat(e.target.value))}
-              style={{
-                width: '100%',
-                height: '8px',
-                borderRadius: '4px',
-                background: `linear-gradient(to right, ${colors.tertiary.orange} 0%, ${colors.tertiary.yellow} ${formData.temperature * 100}%, ${colors.primary.lightBlue} ${formData.temperature * 100}%, ${colors.primary.lightBlue} 100%)`,
-                boxShadow: `0 2px 4px ${colors.tertiary.blueGrey}30`,
-                outline: 'none',
-                appearance: 'none'
-              }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '12px', color: colors.tertiary.lightGrey }}>
-              <span>0 (Focused)</span>
-              <span>1 (Creative)</span>
-            </div>
-          </div>
-        </div>
+            {/* Model Configuration Section */}
+            <CollapsibleSection
+              title="🤖 Model Configuration"
+              isExpanded={modelConfigExpanded}
+              onToggle={() => setModelConfigExpanded(!modelConfigExpanded)}
+            >
+              {/* Temperature */}
+              <div style={{ marginBottom: '32px' }}>
+                <label style={labelStyle}>🌡️ Temperature: {formData.temperature}</label>
+                <div style={helperTextStyle}>Controls randomness: 0 = focused, 1 = creative</div>
+                <div style={{ position: 'relative', marginTop: '8px' }}>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.01"
+                    value={formData.temperature}
+                    onChange={(e) => handleInputChange('temperature', parseFloat(e.target.value))}
+                    style={{
+                      width: '100%',
+                      height: '8px',
+                      borderRadius: '4px',
+                      background: `linear-gradient(to right, ${colors.tertiary.orange} 0%, ${colors.tertiary.yellow} ${formData.temperature * 100}%, ${colors.primary.lightBlue} ${formData.temperature * 100}%, ${colors.primary.lightBlue} 100%)`,
+                      boxShadow: `0 2px 4px ${colors.tertiary.blueGrey}30`,
+                      outline: 'none',
+                      appearance: 'none'
+                    }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '12px', color: colors.tertiary.lightGrey }}>
+                    <span>0 (Focused)</span>
+                    <span>1 (Creative)</span>
+                  </div>
+                </div>
+              </div>
 
-        {/* Model */}
-        <div style={{ marginBottom: '32px' }}>
-          <label style={labelStyle}>⚡ Model</label>
-          <CustomDropdown
-            value={formData.model}
-            onChange={(value) => handleInputChange('model', value)}
-            options={[
-              { value: 'GPT-4.1', label: 'GPT-4.1', icon: '🤖' },
-              { value: 'GPT-5', label: 'GPT-5', icon: '⚡' }
-            ]}
-            placeholder="Select AI Model"
-            onFocus={(e) => {
-              // Optional: Add any focus handling
-            }}
-            onBlur={(e) => {
-              // Optional: Add any blur handling
-            }}
-          />
-          <div style={helperTextStyle}>Select the AI model for processing</div>
-        </div>
-      </CollapsibleSection>
-
+              {/* Model */}
+              <div style={{ marginBottom: '32px' }}>
+                <label style={labelStyle}>⚡ Model</label>
+                <CustomDropdown
+                  value={formData.model}
+                  onChange={(value) => handleInputChange('model', value)}
+                  options={[
+                    { value: 'GPT-4.1', label: 'GPT-4.1', icon: '🤖' },
+                    { value: 'GPT-5', label: 'GPT-5', icon: '⚡' }
+                  ]}
+                  placeholder="Select AI Model"
+                  onFocus={(e) => {
+                    // Optional: Add any focus handling
+                  }}
+                  onBlur={(e) => {
+                    // Optional: Add any blur handling
+                  }}
+                />
+                <div style={helperTextStyle}>Select the AI model for processing</div>
+              </div>
+            </CollapsibleSection>
+            </>
+      }
       {/* File Upload */}
+      {!formData.file && fileInfo && initializedFromUrl && (
+        <>
+            <p
+              style={{
+                color: 'black',
+                marginTop: '8px',
+                fontSize: '20px', margin : '0'
+              }}
+            >
+              PDF loaded from SharePoint: 
+            </p>
+            <p
+              style={{
+                color: 'black',
+                fontSize: '20px', marginTop : '0'
+              }}
+            >
+              <strong> {fileInfo.filename} </strong>
+            </p>
+        </>
+          )}
+      {!initializedFromUrl &&
       <div style={{ marginBottom: '32px' }}>
         <h2 style={sectionHeaderStyle}>📁 Document Upload</h2>
         <div
@@ -995,7 +1099,7 @@ if (isInitializing) {
             </button>
           </div>
           <p style={{ marginTop: '16px', color: colors.tertiary.lightGrey, fontSize: '14px' }}>
-            Supports PDF, DOCX, and PPTX files
+            Supports PDF files
           </p>
           {uploadError && (
             <p style={{ color: colors.tertiary.red, marginTop: '8px', fontSize: '14px' }}>
@@ -1014,18 +1118,6 @@ if (isInitializing) {
             </p>
           )}
 
-          {/* NEW: show info when PDF came from SharePoint init */}
-          {!formData.file && fileInfo && initializedFromUrl && (
-            <p
-              style={{
-                color: colors.secondary.seaGreen,
-                marginTop: '8px',
-                fontSize: '14px'
-              }}
-            >
-              PDF loaded from SharePoint: {fileInfo.filename} ({fileInfo.page_count} pages)
-            </p>
-          )}
           {outputConfig.outputType === 'sharepoint' && outputConfig.sharepointFolder && (
             <div style={{ 
               marginTop: '12px', 
@@ -1052,6 +1144,7 @@ if (isInitializing) {
           )}
         </div>
       </div>
+      }
 
       {/* Page Selection - Only show if file is uploaded */}
       {fileInfo && (
