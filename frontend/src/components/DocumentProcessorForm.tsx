@@ -185,6 +185,7 @@ const DocumentProcessorForm: React.FC = () => {
       {...formData, temperature: Number(temperature), model: model}
   )
 
+
   const initFromSharepoint = async () => {
     try {
       const response = await fetch(`${BACKEND_URL}api/init_from_sharepoint`, {
@@ -447,7 +448,7 @@ const DocumentProcessorForm: React.FC = () => {
       body: JSON.stringify({
         job_id: jobId,
         page_number: pageNumber,
-        original_file_name: formData.file
+        original_file_name: fileInfo ? fileInfo.filename : 'No file'
       }),
     });
 

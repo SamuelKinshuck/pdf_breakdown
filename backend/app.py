@@ -506,8 +506,6 @@ def init_from_sharepoint():
         # We expect 5 consecutive rows: [role, task, context, format, constraints]
         try:
             slice_vals = df.iloc[row_idx:row_idx + 5, col_idx].tolist()
-            for i in range(100):
-                print('~' * 10)
             print('slice_vals')
             print(slice_vals)
         except Exception as e:
@@ -1020,6 +1018,8 @@ def process_page():
         
         file_id = job.get('file_id')
         original_file_name = job.get('original_file_name')
+        print('original_file_name')
+        print(original_file_name)
         selected_pages = job.get('selected_pages', [])
         system_prompt = job.get('system_prompt')
         user_prompt = job.get('user_prompt')
