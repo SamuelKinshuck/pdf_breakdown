@@ -1003,6 +1003,7 @@ def process_document():
 def process_page():
     data = request.get_json()
     job_id = data.get('job_id')
+    original_file_name = data.get('original_file_name')
     page_number = data.get('page_number')
     
     if not job_id or page_number is None:
@@ -1017,7 +1018,7 @@ def process_page():
             return jsonify({'success': False, 'error': 'Job not found'}), 404
         
         file_id = job.get('file_id')
-        original_file_name = job.get('original_file_name')
+        
         print('original_file_name')
         print(original_file_name)
         selected_pages = job.get('selected_pages', [])

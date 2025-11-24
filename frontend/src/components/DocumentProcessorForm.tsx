@@ -215,6 +215,8 @@ const DocumentProcessorForm: React.FC = () => {
       }
 
       setFileInfo(data.pdf_file);
+      console.log('XXX')
+      console.log(data.pdf_file)
 
       setFormData(prev => ({
         ...prev,
@@ -439,9 +441,10 @@ const DocumentProcessorForm: React.FC = () => {
     
     handlePageSelection(selectedPages);
   };
-  console.log('isProcessing', isProcessing)
+
 
   const processPage = async (jobId: string, pageNumber: number) => {
+    console.log(fileInfo)
     const response = await fetch(`${BACKEND_URL}/process_page`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
