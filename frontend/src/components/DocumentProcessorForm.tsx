@@ -10,6 +10,50 @@ import { BACKEND_URL } from '../apiConfig';
 import AI from '../assets/ai.png'
 import PromptSummaryCompact from './PromptSummaryCompact';
 
+
+  // ---- helpers ----
+  const sanitiseTemperature = (raw: string | null | undefined): number | 'error' => {
+    if (raw == null || raw.trim() === '') return 0; // default
+    const s = raw.trim().replace(',', '.');
+
+    // percentage with % sign
+    if (/%$/.test(s)) {
+      const n = parseFloat(s.slice(0, -1));
+      if (!Number.isFinite(n)) return 'error';
+      const t = n / 100;
+      return t >= 0 && t <= 1 ? t : 'error';
+    }
+
+    // plain number
+    const n = parseFloat(s);
+    if (!Number.isFinite(n)) return 'error';
+
+    // If looks like 0–100 without %, treat as percent; else expect 0–1
+    if (n > 1) {
+      // treat 1–100 as percentage, otherwise invalid
+      if (n <= 100) {
+        const t = n / 100;
+        return t >= 0 && t <= 1 ? t : 'error';
+      }
+      return 'error';
+    }
+
+    return n >= 0 && n <= 1 ? n : 'error';
+  };
+
+  const sanitiseIntegerish = (
+    raw: string | null,
+    fieldName: 'row' | 'column'
+  ): number | undefined | 'error' => {
+    if (raw == null || raw.trim() === '') return undefined; // optional
+    const s = raw.trim().replace(',', '.'); // tolerate comma decimals
+    const n = Number(s);
+    if (!Number.isFinite(n)) return 'error';
+    // Round to nearest integer (e.g., 3.0 -> 3, 5.6 -> 6)
+    const int = Math.round(n);
+    return int;
+  };
+
 interface InitFromSharepointResponse {
   success: boolean;
   pdf_file: FileUploadResponse;
@@ -92,48 +136,7 @@ const DocumentProcessorForm: React.FC = () => {
   const rawColumn = searchParams.get('column');
   const rawTemperature = searchParams.get('temperature');
 
-  // ---- helpers ----
-  const sanitiseTemperature = (raw: string | null | undefined): number | 'error' => {
-    if (raw == null || raw.trim() === '') return 0; // default
-    const s = raw.trim().replace(',', '.');
 
-    // percentage with % sign
-    if (/%$/.test(s)) {
-      const n = parseFloat(s.slice(0, -1));
-      if (!Number.isFinite(n)) return 'error';
-      const t = n / 100;
-      return t >= 0 && t <= 1 ? t : 'error';
-    }
-
-    // plain number
-    const n = parseFloat(s);
-    if (!Number.isFinite(n)) return 'error';
-
-    // If looks like 0–100 without %, treat as percent; else expect 0–1
-    if (n > 1) {
-      // treat 1–100 as percentage, otherwise invalid
-      if (n <= 100) {
-        const t = n / 100;
-        return t >= 0 && t <= 1 ? t : 'error';
-      }
-      return 'error';
-    }
-
-    return n >= 0 && n <= 1 ? n : 'error';
-  };
-
-  const sanitiseIntegerish = (
-    raw: string | null,
-    fieldName: 'row' | 'column'
-  ): number | undefined | 'error' => {
-    if (raw == null || raw.trim() === '') return undefined; // optional
-    const s = raw.trim().replace(',', '.'); // tolerate comma decimals
-    const n = Number(s);
-    if (!Number.isFinite(n)) return 'error';
-    // Round to nearest integer (e.g., 3.0 -> 3, 5.6 -> 6)
-    const int = Math.round(n);
-    return int;
-  };
 
   // ---- validate required presence first ----
   if (!folderName || !xlsxFilename || !pdfFilename || !siteName) {
@@ -163,6 +166,12 @@ const DocumentProcessorForm: React.FC = () => {
     errors.push(`Invalid column "${rawColumn ?? ''}". Must be a number (will be rounded to an integer).`);
   }
 
+  const validModels = ['gpt-4.1', 'gpt-5'];
+
+  if (typeof model !== 'string' || !validModels.includes(model.trim().toLowerCase())) {
+    errors.push(`Invalid model "${model ?? ''}". Must be one of: ${validModels.join(', ')}.`);
+  }
+
   if (errors.length > 0) {
     setInitError(`Cannot sanitise URL parameters: ${errors.join(' ')}`);
     return;
@@ -172,6 +181,9 @@ const DocumentProcessorForm: React.FC = () => {
   setIsInitializing(true);
   setInitError(null);
   setUploadError('');
+  setFormData(
+      {...formData, temperature: Number(temperature), model: model}
+  )
 
   const initFromSharepoint = async () => {
     try {
@@ -434,7 +446,8 @@ const DocumentProcessorForm: React.FC = () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         job_id: jobId,
-        page_number: pageNumber
+        page_number: pageNumber,
+        original_file_name: formData.file
       }),
     });
 

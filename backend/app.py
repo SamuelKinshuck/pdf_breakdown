@@ -18,6 +18,8 @@ except:
 PROJECT_ROOT = BASE_DIR.parent
 sys.path.append(str(PROJECT_ROOT))
 
+
+
 import shutil
 import subprocess
 
@@ -179,7 +181,10 @@ try:
     BASE_DIR = Path(__file__).resolve().parent
 except NameError:
     BASE_DIR = Path.cwd()
-UPLOAD_ROOT = BASE_DIR / 'uploads'
+
+import tempfile
+UPLOAD_ROOT = Path(tempfile.gettempdir()) / "pdf_breakdown_uploads"
+UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 
@@ -388,6 +393,32 @@ def normalize(value):
     except TypeError:
         pass
     return value
+
+
+import time
+import shutil
+
+def cleanup_upload_root(max_age_seconds: int = 3600):
+    """
+    Delete per-file_id directories under UPLOAD_ROOT that are older than max_age_seconds.
+    """
+    now = time.time()
+    if not UPLOAD_ROOT.exists():
+        return
+    for child in UPLOAD_ROOT.iterdir():
+        try:
+            if child.is_dir():
+                age = now - child.stat().st_mtime
+                if age > max_age_seconds:
+                    shutil.rmtree(child, ignore_errors=True)
+        except Exception:
+            # Don't let cleanup errors break requests
+            traceback.print_exc()
+
+@app.before_request
+def _cleanup_uploads_periodically():
+    # this is cheap enough to run each request
+    cleanup_upload_root()
 
 
 @app.route('/download/<path:filename>', methods=['GET'])
@@ -988,6 +1019,7 @@ def process_page():
             return jsonify({'success': False, 'error': 'Job not found'}), 404
         
         file_id = job.get('file_id')
+        original_file_name = job.get('original_file_name')
         selected_pages = job.get('selected_pages', [])
         system_prompt = job.get('system_prompt')
         user_prompt = job.get('user_prompt')
@@ -1085,7 +1117,28 @@ def process_page():
                     }), 500
                 
                 # Create DataFrame
-                df = pd.DataFrame(all_results, columns=["page", "gpt_response"])
+                df_raw = pd.DataFrame(all_results, columns=["page", "gpt_response"])
+                df_clean_list = []
+                chars_this_chunk = 0
+                previous_row_chunk = 0
+                this_chunk = 1
+                for index, row in df_raw.iterrows():
+
+                    chars_this_chunk += len(row['gpt_response'])
+                    if chars_this_chunk > 20000:
+                        this_chunk  = previous_row_chunk + 1
+                        chars_this_chunk = len(row['gpt_response'])
+                    
+                    new_row = {
+                        'Data reference' : None,
+                        'Chunk (suggested)' : this_chunk,
+                        'Brief description (optional)' : f'Page {row["page"]}',
+                        'Source (optional)' : original_file_name,
+                        'Data' : row['gpt_response']
+                    }
+                    previous_row_chunk = this_chunk
+                    df_clean_list.append(new_row)
+                df = pd.DataFrame(df_clean_list)
 
                 # ---- Hardening: clean text to avoid control chars / normalization issues ----
                 _CTRL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")  # keep \t \n \r
