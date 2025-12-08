@@ -2,8 +2,6 @@ from flask_cors import CORS
 import os
 from werkzeug.utils import secure_filename
 import PyPDF2
-from docx import Document
-from pptx import Presentation
 
 import sys
 from pathlib import Path
@@ -365,7 +363,7 @@ CORS(app)  # allow all origins; tighten in prod
 # Configuration
 UPLOAD_FOLDER = 'uploads'
 # Configuration
-ALLOWED_EXTENSIONS = {'pdf', 'docx', 'pptx'}
+ALLOWED_EXTENSIONS = {'pdf'}
 app.config['UPLOAD_FOLDER'] = str(UPLOAD_ROOT)
 
 # Ensure root exists
@@ -428,6 +426,23 @@ def download(filename):
                                mimetype="text/csv; charset=utf-8",
                                as_attachment=True)
 
+
+EXCEL_CELL_CHAR_LIMIT = 32767
+
+
+def _at_excel_cell_limit(value, limit: int = EXCEL_CELL_CHAR_LIMIT) -> bool:
+    """
+    True if the given cell value is at (or above) Excel's per-cell character limit.
+    We cast to str so this works for numbers, etc.
+    """
+    if value is None:
+        return False
+    try:
+        text = str(value)
+    except Exception:
+        text = f"{value}"
+    return len(text) >= limit
+
 @app.route("/api/init_from_sharepoint", methods=["POST"])
 def init_from_sharepoint():
     """
@@ -437,7 +452,7 @@ def init_from_sharepoint():
 
     We:
       • Read the prompt cells from an Excel file on SharePoint.
-      • Download the (PDF/DOCX/PPTX) file from SharePoint into UPLOAD_ROOT,
+      • Download the (PDF) file from SharePoint into UPLOAD_ROOT,
         convert/normalise it to uploads/<file_id>/document.pdf,
         and count pages exactly like /upload.
       • Return a response that matches FileUploadResponse + prompt fields.
@@ -523,6 +538,17 @@ def init_from_sharepoint():
         context_val     = slice_vals[2]
         format_val      = slice_vals[3]
         constraints_val = slice_vals[4]
+        excel_limit_hits = {}
+        for field_name, cell_value in {
+            "role": role_val,
+            "task": task_val,
+            "context": context_val,
+            "format": format_val,
+            "constraints": constraints_val,
+        }.items():
+            # Excel truncates at exactly 32,767 characters; use >= for safety
+            if _at_excel_cell_limit(cell_value, EXCEL_CELL_CHAR_LIMIT):
+                excel_limit_hits[field_name] = len(str(cell_value))
 
         # ---- 4. Download the file from SharePoint into uploads/ ------------
 
@@ -614,7 +640,8 @@ def init_from_sharepoint():
                     "context":     normalize(context_val),
                     "format":      normalize(format_val),
                     "constraints": normalize(constraints_val),
-                }
+                },
+                "excel_limit_hits": excel_limit_hits,
             }), 200
 
     except Exception as e:
@@ -738,56 +765,9 @@ def file_exists_endpoint():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-def convert_to_pdf(file_path, original_filename):
-    """Convert docx or pptx files to PDF and return the PDF path"""
-    file_ext = original_filename.rsplit('.', 1)[1].lower()
-
-    if file_ext == 'pdf':
-        return file_path
-
-    # Convert DOCX/PPTX to PDF using LibreOffice headless
-    if file_ext in ['docx', 'pptx']:
-        try:
-            # Create output directory
-            output_dir = os.path.dirname(file_path)
-
-            # Use LibreOffice to convert to PDF
-            result = subprocess.run([
-                'soffice', '--headless', '--convert-to', 'pdf', '--outdir',
-                output_dir, file_path
-            ],
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=30)
-
-            if result.returncode == 0:
-                # Generate PDF filename
-                base_name = os.path.splitext(original_filename)[0]
-                pdf_filename = f"{base_name}.pdf"
-                pdf_path = os.path.join(output_dir, pdf_filename)
-
-                if os.path.exists(pdf_path):
-                    return pdf_path
-                else:
-                    print(
-                        f"PDF conversion succeeded but file not found: {pdf_path}"
-                    )
-                    return file_path
-            else:
-                print(f"LibreOffice conversion failed: {result.stderr}")
-                return file_path
-        except subprocess.TimeoutExpired:
-            print("LibreOffice conversion timed out")
-            return file_path
-        except Exception as e:
-            print(f"Error converting file: {e}")
-            return file_path
-
-    return file_path
-
 
 def count_document_pages(file_path, original_filename):
-    """Count the number of pages in a document (PDF, DOCX, or PPTX)"""
+    """Count the number of pages in a document (PDF)"""
     file_ext = original_filename.rsplit('.', 1)[1].lower()
 
     try:
@@ -797,23 +777,6 @@ def count_document_pages(file_path, original_filename):
                 pdf_reader = PyPDF2.PdfReader(file)
                 return len(pdf_reader.pages)
 
-        elif file_ext == 'docx':
-            # Count DOCX pages (approximation based on content)
-            doc = Document(file_path)
-            # This is an approximation - actual page count depends on formatting
-            # For a more accurate count, we'd need to convert to PDF first
-            paragraphs = len(doc.paragraphs)
-            # Rough estimate: 25-30 paragraphs per page
-            estimated_pages = max(1, (paragraphs + 25) // 30)
-            return estimated_pages
-
-        elif file_ext == 'pptx':
-            # Count PPTX slides
-            prs = Presentation(file_path)
-            return len(prs.slides)
-
-        else:
-            return 1
 
     except Exception as e:
         print(f"Error counting pages: {e}")
@@ -831,7 +794,7 @@ def upload_file():
     if not file or not allowed_file(file.filename):
         return jsonify({
             'error':
-            'Invalid file type. Only PDF, DOCX, and PPTX files are allowed.'
+            'Invalid file type. Only PDF files are allowed.'
         }), 400
 
     original_filename = secure_filename(file.filename)
@@ -843,12 +806,10 @@ def upload_file():
     original_path = dest_dir / f"original{Path(original_filename).suffix.lower()}"
     file.save(str(original_path))
 
-    # Try your convert_to_pdf() first
     try:
-        converted_path = convert_to_pdf(str(original_path), original_filename)
-        converted_path = Path(converted_path)
+        converted_path = Path(str(original_path))
 
-        # If conversion actually yielded a PDF file that exists, normalize it to document.pdf
+        # normalize it to document.pdf
         canonical_pdf = dest_dir / 'document.pdf'
         if converted_path.suffix.lower() == '.pdf' and converted_path.exists():
             # If LibreOffice wrote <basename>.pdf into dest_dir, move/rename it

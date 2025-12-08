@@ -213,7 +213,9 @@ const PromptSummaryCompact: React.FC<PromptSummaryCompactProps> = ({ prompt, col
                         'textAlign': 'left', 
                         padding: '8px 12px'
            }}>
-            <strong> 🌡️ Temperature:</strong> {prompt.temperature.toFixed(2)}
+            <strong> 
+              🌡️ Temperature:
+              </strong> {prompt.model.toLowerCase() === 'gpt-5' ? 'NA (GPT-5 does not support a temperature parameter)' : prompt.temperature.toFixed(2)}
           </div>
 
           <div
