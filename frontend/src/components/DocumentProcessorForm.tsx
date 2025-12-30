@@ -137,11 +137,12 @@ const DocumentProcessorForm: React.FC = () => {
   const rawRow = searchParams.get('row');
   const rawColumn = searchParams.get('column');
   const rawTemperature = searchParams.get('temperature');
+  const rawRowId = searchParams.get('rowID')
 
 
 
   // ---- validate required presence first ----
-  if (!folderName || !xlsxFilename || !pdfFilename || !siteName) {
+  if (!folderName || !xlsxFilename || !pdfFilename || !siteName || !rawRowId) {
     if (folderName || xlsxFilename || pdfFilename || siteName) {
       setInitError('Some needed parameters were not provided.');
     }
@@ -161,6 +162,11 @@ const DocumentProcessorForm: React.FC = () => {
   const row = sanitiseIntegerish(rawRow, 'row');
   if (row === 'error') {
     errors.push(`Invalid row "${rawRow ?? ''}". Must be a number (will be rounded to an integer).`);
+  }
+
+  const row_id = sanitiseIntegerish(rawRowId, 'row');
+  if (row_id === 'error') {
+    errors.push(`Invalid row ID "${rawRowId ?? ''}". Must be a number (will be rounded to an integer).`);
   }
 
   const column = sanitiseIntegerish(rawColumn, 'column');
@@ -201,6 +207,7 @@ const DocumentProcessorForm: React.FC = () => {
           column: column as number | undefined,
           xlsxFilename,
           pdfFilename,
+          row_id,
           forceError
         })
       });
@@ -217,8 +224,7 @@ const DocumentProcessorForm: React.FC = () => {
       }
 
       setFileInfo(data.pdf_file);
-      console.log('XXX')
-      console.log(data.pdf_file)
+
 
       setFormData(prev => ({
         ...prev,
@@ -234,6 +240,16 @@ const DocumentProcessorForm: React.FC = () => {
           (_, i) => i + 1
         )
       }));
+
+      setOutputConfig(
+        {
+          outputType: "init_from_sharepoint",
+          sharepointFolder: folderName,
+          rowID: row_id,
+          filename: xlsxFilename,
+          siteName
+        }
+      )
 
       setInitializedFromUrl(true);
     } catch (err: any) {
@@ -589,7 +605,7 @@ const DocumentProcessorForm: React.FC = () => {
                 console.error(e);
                 setProcessingError(e instanceof Error ? e.message : String(e));
               }
-            } else if (outputConfig.outputType === 'sharepoint') {
+            } else if (outputConfig.outputType === 'sharepoint' || outputConfig.outputType === 'init_from_sharepoint') {
               setShowSuccessModal(true);
             }
             
@@ -1194,7 +1210,7 @@ if (isInitializing) {
             </p>
           )}
 
-          {outputConfig.outputType === 'sharepoint' && outputConfig.sharepointFolder && (
+          {(outputConfig.outputType === 'sharepoint' || outputConfig.outputType === 'init_from_sharepoint') && outputConfig.sharepointFolder && (
             <div style={{ 
               marginTop: '12px', 
               padding: '12px', 

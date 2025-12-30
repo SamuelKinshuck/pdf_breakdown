@@ -51,7 +51,8 @@ from backend.sharepoint import (
     sharepoint_file_exists,
     sharepoint_export_df_to_csv,
     sharepoint_delete_file_by_path,
-    sharepoint_import_excel
+    sharepoint_import_excel,
+    sharepoint_create_folder,
 )
 from backend.database import (
     save_prompt,
@@ -63,6 +64,7 @@ from backend.database import (
     get_all_page_results,
     delete_page_results_table
 )
+from io import BytesIO
 
 @dataclass
 class ConnectionInfo:
@@ -111,6 +113,33 @@ def _new_ctx(conn_id: str):
         )
         _CTX_CACHE[conn_id] = (ctx, now)
         return ctx
+    
+
+def _df_to_xlsx_bytesio(df: pd.DataFrame) -> BytesIO:
+    """
+    Convert df to an in-memory XLSX (BytesIO) using openpyxl.
+    """
+    xlsx_io = BytesIO()
+    with pd.ExcelWriter(xlsx_io, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="output")
+    xlsx_io.seek(0)
+    return xlsx_io
+
+
+def _sharepoint_upload_bytes_overwrite(ctx, sp_folder_name: str, sp_file_name: str, content: BytesIO) -> bool:
+    """
+    Upload BytesIO to SharePoint folder, overwriting if it already exists.
+    Uses folder.files.add(name, content, overwrite=True).
+    """
+    try:
+        folder = ctx.web.get_folder_by_server_relative_url(sp_folder_name)
+        content.seek(0)
+        folder.files.add(sp_file_name, content, True).execute_query()
+        return True
+    except Exception as e:
+        print(f"SharePoint XLSX upload failed: {e}")
+        return False
+    
 
 def list_children(ctx, server_relative_folder: str):
     """Return dict with 'folders' and 'files' lists for a folder."""
@@ -421,10 +450,12 @@ def _cleanup_uploads_periodically():
 
 @app.route('/download/<path:filename>', methods=['GET'])
 def download(filename):
-    return send_from_directory(app.config['UPLOAD_FOLDER'],
-                               filename,
-                               mimetype="text/csv; charset=utf-8",
-                               as_attachment=True)
+    # Let Flask infer mimetype from extension; don't force CSV.
+    return send_from_directory(
+        app.config['UPLOAD_FOLDER'],
+        filename,
+        as_attachment=True
+    )
 
 
 EXCEL_CELL_CHAR_LIMIT = 32767
@@ -466,6 +497,7 @@ def init_from_sharepoint():
         pdfFilename  = data.get("pdfFilename")
         sheet        = data.get("sheet")
         row          = data.get("row")
+        row_id       = data.get("row_id")
         column       = data.get("column")
         forceError   = data.get('forceError')
         if forceError:
@@ -868,16 +900,6 @@ def _init_job_state(job_id: str,
         "csv_download_url": None,
     }
 
-def _save_job(job_id: str, update: dict):
-    with _JOBS_LOCK:
-        job = _JOBS.get(job_id)
-        if job is None:
-            return
-        if job.get("status") in ("completed", "error") and update.get("status") not in ("completed", "error"):
-            return
-        job.update(update)
-        job["updated_at"] = _now_iso()
-
 
 # -----------------------------------------------------------------------------
 # /process (modified to just initialize job)
@@ -987,7 +1009,9 @@ def process_page():
         user_prompt = job.get('user_prompt')
         model = job.get('model')
         output_config = job.get('output_config', {'outputType': 'browser'})
-    
+        if not job.get("processing_started_at"):
+            job["processing_started_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+
     try:
         # Resolve PDF path
         pdf_path = _pdf_path_for_file_id(file_id)
@@ -1080,27 +1104,53 @@ def process_page():
                 
                 # Create DataFrame
                 df_raw = pd.DataFrame(all_results, columns=["page", "gpt_response"])
-                df_clean_list = []
-                chars_this_chunk = 0
-                previous_row_chunk = 0
-                this_chunk = 1
-                for index, row in df_raw.iterrows():
 
-                    chars_this_chunk += len(row['gpt_response'])
-                    if chars_this_chunk > 20000:
-                        this_chunk  = previous_row_chunk + 1
-                        chars_this_chunk = len(row['gpt_response'])
-                    
-                    new_row = {
-                        'Data reference' : None,
-                        'Chunk (suggested)' : this_chunk,
-                        'Brief description (optional)' : f'Page {row["page"]}',
-                        'Source (optional)' : original_file_name,
-                        'Data' : row['gpt_response']
-                    }
-                    previous_row_chunk = this_chunk
-                    df_clean_list.append(new_row)
+                # Timestamp = start of processing for this job (same on every row)
+                with _JOBS_LOCK:
+                    job = _JOBS.get(job_id, {})
+                processing_ts = job.get("processing_started_at") or datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+                TARGET_CHARS_PER_CHUNK = 26140
+
+                def _safe_len(x) -> int:
+                    try:
+                        return len(x) if isinstance(x, str) else len(str(x))
+                    except Exception:
+                        return 0
+
+                df_clean_list = []
+                chunk_id = 1
+                chunk_sum = 0
+
+                for _, r in df_raw.iterrows():
+                    text = r["gpt_response"]
+                    text_len = _safe_len(text)
+
+                    # Decide whether to start a new chunk BEFORE placing this row.
+                    # If adding this row would exceed target, choose the closer of:
+                    #   - end chunk now (distance = target - current_sum)
+                    #   - include row (distance = (current_sum + len) - target)
+                    # Always keep at least one row per chunk.
+                    if chunk_sum > 0 and (chunk_sum + text_len) > TARGET_CHARS_PER_CHUNK:
+                        dist_if_break = TARGET_CHARS_PER_CHUNK - chunk_sum
+                        dist_if_keep  = (chunk_sum + text_len) - TARGET_CHARS_PER_CHUNK
+                        if dist_if_break <= dist_if_keep:
+                            chunk_id += 1
+                            chunk_sum = 0
+
+                    chunk_sum += text_len
+
+                    df_clean_list.append({
+                        "timestamp": processing_ts,
+                        "chunk": chunk_id,
+                        "Data reference": None,
+                        "Brief description (optional)": f'Page {r["page"]}',
+                        "Source (optional)": original_file_name,
+                        "Data": text
+                    })
+
                 df = pd.DataFrame(df_clean_list)
+
 
                 # ---- Hardening: clean text to avoid control chars / normalization issues ----
                 _CTRL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")  # keep \t \n \r
@@ -1116,78 +1166,106 @@ def process_page():
                         x = _CTRL_RE.sub('', x)
                     return x
 
-                df = df.applymap(_clean_cell)
+                df = df.map(_clean_cell)
                 # ---------------------------------------------------------------------------
 
                 # Prefer Excel-friendly UTF-8 with BOM for widest compatibility
                 ENCODING = 'utf-8-sig'
 
                 # Handle output based on output_config
-                if output_config.get('outputType') == 'sharepoint':
-                    print(f'[/process_page] Saving to SharePoint')
+                out_type = (output_config or {}).get("outputType", "browser")
+
+                if out_type == "init_from_sharepoint":
+                    print('[/process_page] init_from_sharepoint: Saving XLSX to SharePoint pdf_output subfolder')
+
+                    # Required meta (frontend must send these when initialized from URL)
+                    folder_name   = output_config.get("sharepointFolder")        # e.g. "/sites/.../Shared Documents/some/folder"
+                    xlsx_filename = output_config.get("filename")      # e.g. "input.xlsx"
+                    row_id        = output_config.get("row_id")            # required for naming
+                    site_name     = output_config.get("siteName")
+                    tenant        = "tris42.onmicrosoft.com"
+                    client_id     = "d44a05d5-c6a5-4bbb-82d2-443123722380"
+
+                    if not (folder_name and xlsx_filename and row_id):
+                        # Fallback to browser if meta missing
+                        print('[/process_page] init_from_sharepoint missing folderName/xlsxFilename/row_id; falling back to browser download')
+                        out_type = "browser"
+                    else:
+                        # Build output folder + filename
+                        xlsx_stem = Path(xlsx_filename).stem
+                        sp_out_folder = f"{folder_name.rstrip('/')}/pdf_output".replace("//", "/")
+                        sp_out_name = f"{xlsx_stem}_pdf_{row_id}.xlsx"
+
+                        # Create SharePoint context (same style as init_from_sharepoint route)
+                        sp_site_url = f"https://tris42.sharepoint.com/sites/{site_name}/"
+                        ctx = sharepoint_create_context(sp_site_url, tenant, client_id)
+
+                        # Ensure subfolder exists
+                        sharepoint_create_folder(ctx, sp_out_folder)
+
+                        # Convert df -> xlsx bytes and upload (overwrite)
+                        xlsx_io = _df_to_xlsx_bytesio(df)
+                        ok = _sharepoint_upload_bytes_overwrite(ctx, sp_out_folder, sp_out_name, xlsx_io)
+
+                        if ok:
+                            result["xlsx_filename"] = sp_out_name
+                            result["xlsx_download_url"] = None
+                            result["note"] = f"Uploaded to SharePoint: {sp_out_folder}/{sp_out_name}"
+                        else:
+                            print('[/process_page] init_from_sharepoint upload failed; falling back to browser download')
+                            out_type = "browser"
+
+
+                if out_type == "sharepoint":
+                    print('[/process_page] Saving XLSX to SharePoint (explicit sharepoint mode)')
                     context_id = output_config.get('contextId')
                     sharepoint_folder = output_config.get('sharepointFolder')
-                    filename = output_config.get('filename', 'output.csv')
-                    
+                    filename = output_config.get('filename', 'output.xlsx')
+
+                    if not filename.lower().endswith(".xlsx"):
+                        filename = f"{Path(filename).stem}.xlsx"
+
                     if not (context_id and sharepoint_folder):
-                        print(f'[/process_page] Missing SharePoint context or folder, falling back to browser output')
-                        timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
-                        csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
-                        upload_dir = UPLOAD_ROOT / file_id
-                        csv_path = upload_dir / csv_filename
-                        upload_dir.mkdir(parents=True, exist_ok=True)
-                        # Explicit encoding + newline handling
-                        with open(csv_path, 'w', encoding=ENCODING, newline='') as f:
-                            df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
-                        result['csv_filename'] = csv_filename
-                        result['csv_download_url'] = f"/download/{file_id}/{csv_filename}"
-                        result['note'] = f"Saved locally with {ENCODING} encoding"
-                        result['error'] = "Missing SharePoint configuration, saved locally instead"
+                        print('[/process_page] Missing SharePoint context or folder, falling back to browser output')
+                        out_type = "browser"
                     else:
                         def _upload_to_sharepoint():
-                            # If your helper supports passing encoding, add it there.
                             ctx = _new_ctx(context_id)
-                            return sharepoint_export_df_to_csv(ctx, sharepoint_folder, filename, df)
-                        
+                            sharepoint_create_folder(ctx, sharepoint_folder)  # safe if exists
+                            xlsx_io = _df_to_xlsx_bytesio(df)
+                            return _sharepoint_upload_bytes_overwrite(ctx, sharepoint_folder, filename, xlsx_io)
+
                         try:
                             future = EXECUTOR.submit(_upload_to_sharepoint)
                             success = future.result(timeout=60)
-                            
+
                             if success:
-                                print(f'[/process_page] Successfully uploaded to SharePoint')
-                                result['csv_filename'] = filename
-                                result['csv_download_url'] = None
-                                result['note'] = f"Uploaded to SharePoint (data cleaned, CSV intended as UTF-8)"
+                                result['xlsx_filename'] = filename
+                                result['xlsx_download_url'] = None
+                                result['note'] = "Uploaded XLSX to SharePoint"
                             else:
                                 raise Exception("SharePoint upload returned False")
                         except Exception as sp_error:
                             print(f"SharePoint upload failed: {sp_error}, falling back to browser output")
-                            timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
-                            csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
-                            upload_dir = UPLOAD_ROOT / file_id
-                            csv_path = upload_dir / csv_filename
-                            upload_dir.mkdir(parents=True, exist_ok=True)
-                            with open(csv_path, 'w', encoding=ENCODING, newline='') as f:
-                                df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
-                            result['csv_filename'] = csv_filename
-                            result['csv_download_url'] = f"/download/{file_id}/{csv_filename}"
-                            error_msg = "SharePoint upload timed out" if isinstance(sp_error, FuturesTimeout) else f"SharePoint upload failed: {sp_error}"
-                            result['error'] = f"{error_msg}, saved locally instead"
-                            result['note'] = f"Saved locally with {ENCODING} encoding"
-                else:
+                            out_type = "browser"
+
+
+                if out_type == "browser":
                     # Save to local filesystem for browser download
-                    print(f'[/process_page] Saving to local filesystem')
+                    print('[/process_page] Saving XLSX to local filesystem')
                     timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
-                    csv_filename = secure_filename(f"gpt_responses_{timestamp}.csv")
+                    xlsx_filename = secure_filename(f"gpt_responses_{timestamp}.xlsx")
                     upload_dir = UPLOAD_ROOT / file_id
-                    csv_path = upload_dir / csv_filename
+                    xlsx_path = upload_dir / xlsx_filename
                     upload_dir.mkdir(parents=True, exist_ok=True)
-                    with open(csv_path, 'w', encoding=ENCODING, newline='') as f:
-                        df.to_csv(f, index=False, quoting=csv.QUOTE_MINIMAL)
-                    print(f'[/process_page] CSV saved to {csv_path}')
-                    result['csv_filename'] = csv_filename
-                    result['csv_download_url'] = f"/download/{file_id}/{csv_filename}"
-                    result['note'] = f"Saved locally with {ENCODING} encoding"
+
+                    xlsx_io = _df_to_xlsx_bytesio(df)
+                    with open(xlsx_path, "wb") as f:
+                        f.write(xlsx_io.getvalue())
+
+                    print(f'[/process_page] XLSX saved to {xlsx_path}')
+                    result['xlsx_filename'] = xlsx_filename
+                    result['xlsx_download_url'] = f"/download/{file_id}/{xlsx_filename}"
                 
                 # Perform cleanup after result is prepared but before returning
                 try:

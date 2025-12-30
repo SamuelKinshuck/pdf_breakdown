@@ -8,10 +8,12 @@ interface OutputLocationModalProps {
 }
 
 export interface OutputConfig {
-  outputType: 'browser' | 'sharepoint';
+  outputType: 'browser' | 'sharepoint' | 'init_from_sharepoint';
   sharepointFolder?: string;
   filename?: string;
   contextId?: string;
+  siteName?: string;
+  rowID?: number | string;
 }
 
 interface FolderNode {
