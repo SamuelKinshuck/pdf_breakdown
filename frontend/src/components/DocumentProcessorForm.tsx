@@ -114,6 +114,7 @@ const DocumentProcessorForm: React.FC = () => {
   const [processedPages, setProcessedPages] = useState<{ page: number; gpt_response: string; image_size_bytes?: number }[]>([]);
   const [processingError, setProcessingError] = useState<string | null>(null);
   const [totalPages, setTotalPages] = useState<number>(0);
+  const [wasFallback, setWasFallback] = useState<boolean>(false)
 
   
 
@@ -596,16 +597,19 @@ const DocumentProcessorForm: React.FC = () => {
           if (pageResult.is_last_page) {
             console.log('Last page processed, downloading CSV');
             
-            if (outputConfig.outputType === 'browser' && pageResult.csv_download_url) {
-              const absolute = `${BACKEND_URL}${pageResult.csv_download_url}`;
+            if (outputConfig.outputType === 'browser' && pageResult.xlsx_download_url) {
+              const absolute = `${BACKEND_URL}${pageResult.xlsx_download_url}`;
               try {
-                await downloadCsv(absolute, pageResult.csv_filename);
+                await downloadCsv(absolute, pageResult.xlsx_filename);
                 setShowSuccessModal(true);
               } catch (e) {
                 console.error(e);
                 setProcessingError(e instanceof Error ? e.message : String(e));
               }
             } else if (outputConfig.outputType === 'sharepoint' || outputConfig.outputType === 'init_from_sharepoint') {
+              if(pageResult.fallback) {
+                setWasFallback(true)
+              }
               setShowSuccessModal(true);
             }
             
@@ -1453,7 +1457,9 @@ if (isInitializing) {
       <SuccessModal
         isOpen={showSuccessModal}
         onClose={() => setShowSuccessModal(false)}
-        message="Your document has been successfully processed and the CSV file has been downloaded!"
+        message= {wasFallback ? 
+          "We could not upload the processed results to sharepoint, so they have been downloaded to your browser instead."
+          : "Your document has been successfully processed and the XLSX file has been downloaded!"}
       />
 
       {/* Processing Details Modal */}

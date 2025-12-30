@@ -1174,6 +1174,7 @@ def process_page():
 
                 # Handle output based on output_config
                 out_type = (output_config or {}).get("outputType", "browser")
+                fallback = False
 
                 if out_type == "init_from_sharepoint":
                     print('[/process_page] init_from_sharepoint: Saving XLSX to SharePoint pdf_output subfolder')
@@ -1190,6 +1191,7 @@ def process_page():
                         # Fallback to browser if meta missing
                         print('[/process_page] init_from_sharepoint missing folderName/xlsxFilename/row_id; falling back to browser download')
                         out_type = "browser"
+                        fallback = True
                     else:
                         # Build output folder + filename
                         xlsx_stem = Path(xlsx_filename).stem
@@ -1266,6 +1268,7 @@ def process_page():
                     print(f'[/process_page] XLSX saved to {xlsx_path}')
                     result['xlsx_filename'] = xlsx_filename
                     result['xlsx_download_url'] = f"/download/{file_id}/{xlsx_filename}"
+                    result['fallback'] = fallback
                 
                 # Perform cleanup after result is prepared but before returning
                 try:
