@@ -9,6 +9,7 @@ import SearchPromptsModal, { SavedPrompt } from './SearchPromptsModal';
 import { BACKEND_URL } from '../apiConfig';
 import AI from '../assets/ai.png'
 import PromptSummaryCompact from './PromptSummaryCompact';
+import ExcelLimitWarningModal from './ExcelLimitWarningModal';
 
 
   // ---- helpers ----
@@ -64,6 +65,7 @@ interface InitFromSharepointResponse {
     format: string;
     constraints: string;
   };
+  excel_limit_hits?: { [field: string]: number };
   error?: string;
 } 
 interface FormData {
@@ -285,6 +287,9 @@ const DocumentProcessorForm: React.FC = () => {
     constraints: true
   });
 
+  const [showExcelLimitModal, setShowExcelLimitModal] = useState(false);
+  const [excelLimitFields, setExcelLimitFields] = useState<string[]>([]);
+
   // Color scheme
   const colors = {
     primary: {
@@ -308,6 +313,60 @@ const DocumentProcessorForm: React.FC = () => {
       lightGrey: '#8F8E8F'
     }
   };
+  const EXCEL_CELL_CHAR_LIMIT = 32767;
+
+    const checkPromptFieldsForExcelLimit = useCallback(
+    (prompt: {
+      role: string;
+      task: string;
+      context: string;
+      format: string;
+      constraints: string;
+    }) => {
+      const fields: string[] = [];
+
+      // Excel truncates at exactly 32,767 characters,
+      // so we check for equality, not ">".
+      if (prompt.role && prompt.role.length === EXCEL_CELL_CHAR_LIMIT) {
+        fields.push('Role');
+      }
+      if (prompt.task && prompt.task.length === EXCEL_CELL_CHAR_LIMIT) {
+        fields.push('Task');
+      }
+      if (prompt.context && prompt.context.length === EXCEL_CELL_CHAR_LIMIT) {
+        fields.push('Context');
+      }
+      if (prompt.format && prompt.format.length === EXCEL_CELL_CHAR_LIMIT) {
+        fields.push('Format');
+      }
+      if (prompt.constraints && prompt.constraints.length === EXCEL_CELL_CHAR_LIMIT) {
+        fields.push('Constraints');
+      }
+
+      if (fields.length > 0) {
+        setExcelLimitFields(fields);
+        setShowExcelLimitModal(true);
+      }
+    },
+    [setExcelLimitFields, setShowExcelLimitModal]
+  );
+
+  useEffect(() => {
+    checkPromptFieldsForExcelLimit({
+      role: formData.role,
+      task: formData.task,
+      context: formData.context,
+      format: formData.format,
+      constraints: formData.constraints,
+    });
+  }, [
+    formData.role,
+    formData.task,
+    formData.context,
+    formData.format,
+    formData.constraints,
+    checkPromptFieldsForExcelLimit
+  ]);
 
   const handleInputChange = (field: keyof FormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -1047,7 +1106,7 @@ if (isInitializing) {
         >
           <input
             type="file"
-            accept=".pdf,.docx,.pptx"
+            accept=".pdf"
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) {
@@ -1409,6 +1468,11 @@ if (isInitializing) {
         isOpen={showSearchPromptsModal}
         onClose={() => setShowSearchPromptsModal(false)}
         onSelectPrompt={handleSelectPrompt}
+      />
+      <ExcelLimitWarningModal
+        isOpen={showExcelLimitModal}
+        onClose={() => setShowExcelLimitModal(false)}
+        fields={excelLimitFields}
       />
     </form>
   );

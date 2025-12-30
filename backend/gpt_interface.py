@@ -88,13 +88,18 @@ def get_response_from_chatgpt_simple(system_prompt: str, user_prompt: str, model
     if client is None:
         return "API key not available"
     
+    if model == 'gpt-5':
+        temperature = 1
+    else:
+        temperature = 0
+    
     response = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        #temperature=0
+        temperature=temperature
     )
     return response.choices[0].message.content
 
@@ -103,13 +108,17 @@ def get_response_from_chatgpt_with_functions(user_prompt: str, system_prompt: st
     if client is None:
         return "API key not available"
     
+    if model == 'gpt-5':
+        used_temperature = 1
+    else:
+        used_temperature = temperature
     response = client.chat.completions.create(
         model=model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
-        temperature=temperature,
+        temperature=used_temperature,
         tools=functions,
         tool_choice={"type": "function", "function": {"name": function_name}}
     )
@@ -137,6 +146,10 @@ def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_
         image_data_url = local_image_to_data_url(image_path)
     
     max_retries = 1
+    if model == 'gpt-5':
+        temperature = 1
+    else:
+        temperature = 0
     for attempt in range(max_retries):
         try:
             create_params = {
@@ -151,7 +164,7 @@ def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_
                         ]
                     }
                 ],
-                "temperature": 0
+                "temperature": temperature
             }
             
             response = client.chat.completions.create(**create_params)
@@ -174,6 +187,10 @@ def get_response_from_chatgpt_image_and_functions(system_prompt: str, user_promp
         image_data_url = local_image_to_data_url(image_path)
     
     max_retries = 1
+    if model == 'gpt-5':
+        temperature = 1
+    else:
+        temperature = 0
     for attempt in range(max_retries):
         try:
             response = client.chat.completions.create(
@@ -188,7 +205,7 @@ def get_response_from_chatgpt_image_and_functions(system_prompt: str, user_promp
                         ]
                     }
                 ],
-                temperature=0,
+                temperature=temperature,
                 tools = functions,
                 tool_choice = {"type": "function", "function": {"name": function_name}}
             )
@@ -219,6 +236,10 @@ def get_response_from_chatgpt_multiple_image_and_functions(
         image_data_urls = [local_image_to_data_url(path) for path in image_paths]
 
     max_retries = 1
+    if model == 'gpt-5':
+        temperature = 1
+    else:
+        temperature = 0
     for attempt in range(max_retries):
         try:
             content = [{"type": "text", "text": user_prompt}]
@@ -234,7 +255,7 @@ def get_response_from_chatgpt_multiple_image_and_functions(
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": content}
                 ],
-                temperature=0,
+                temperature=temperature,
                 tools=functions,
                 tool_choice={"type": "function", "function": {"name": function_name}}
             )
