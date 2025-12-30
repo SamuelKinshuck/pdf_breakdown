@@ -55,9 +55,15 @@ import ExcelLimitWarningModal from './ExcelLimitWarningModal';
     return int;
   };
 
+interface BatchFileInfo extends FileUploadResponse {
+  file_stem: string;
+}
+
 interface InitFromSharepointResponse {
   success: boolean;
-  pdf_file: FileUploadResponse;
+  mode?: 'file' | 'folder';
+  pdf_file?: FileUploadResponse;        // file mode (and first file in folder mode)
+  pdf_files?: BatchFileInfo[];          // folder mode
   prompt: {
     role: string;
     task: string;
@@ -67,7 +73,7 @@ interface InitFromSharepointResponse {
   };
   excel_limit_hits?: { [field: string]: number };
   error?: string;
-} 
+}
 interface FormData {
   role: string;
   task: string;
@@ -116,6 +122,15 @@ const DocumentProcessorForm: React.FC = () => {
   const [totalPages, setTotalPages] = useState<number>(0);
   const [wasFallback, setWasFallback] = useState<boolean>(false)
 
+  const [batchFiles, setBatchFiles] = useState<BatchFileInfo[] | null>(null);
+  const [totalFiles, setTotalFiles] = useState<number>(0);
+  const [currentFileIndex, setCurrentFileIndex] = useState<number>(0);
+  const [currentFileName, setCurrentFileName] = useState<string>('');
+  const [currentFilePagesTotal, setCurrentFilePagesTotal] = useState<number>(0);
+  const [currentFilePagesDone, setCurrentFilePagesDone] = useState<number>(0);
+
+  const batchTotalPages = batchFiles?.reduce((s, f) => s + (f.page_count || 0), 0) ?? 0;
+
   
 
   const percent = () => {
@@ -143,7 +158,7 @@ const DocumentProcessorForm: React.FC = () => {
 
 
   // ---- validate required presence first ----
-  if (!folderName || !xlsxFilename || !pdfFilename || !siteName || !rawRowId) {
+    if (!folderName || !xlsxFilename || !siteName || !rawRowId) {
     if (folderName || xlsxFilename || pdfFilename || siteName) {
       setInitError('Some needed parameters were not provided.');
     }
@@ -224,8 +239,48 @@ const DocumentProcessorForm: React.FC = () => {
         throw new Error(data.error || 'Failed to initialise from SharePoint.');
       }
 
-      setFileInfo(data.pdf_file);
+      const pdfFiles = data.pdf_files;
+      const pdfFile = data.pdf_file;
 
+      // ---- Folder mode ----
+      if (pdfFiles && pdfFiles.length > 0) {
+        setBatchFiles(pdfFiles);
+        setFileInfo(pdfFiles[0]); // just for display
+
+        setFormData(prev => ({
+          ...prev,
+          role: data.prompt.role || '',
+          task: data.prompt.task || '',
+          context: data.prompt.context || '',
+          format: data.prompt.format || '',
+          constraints: data.prompt.constraints || '',
+          temperature: temperature as number,
+          model: String(model),
+          selectedPages: [] // folder mode: we process ALL pages of ALL files automatically
+        }));
+
+        setOutputConfig(
+          ({
+            outputType: "init_from_sharepoint",
+            sharepointFolder: folderName,
+            row_id: row_id,
+            filename: xlsxFilename,
+            siteName,
+            batch_mode: true,
+          } as any)
+        );
+
+        setInitializedFromUrl(true);
+        return;
+      }
+
+      // ---- Single file mode ----
+      if (!pdfFile) {
+        throw new Error("Init succeeded but no pdf_file was returned.");
+      }
+
+      setBatchFiles(null);
+      setFileInfo(pdfFile);
 
       setFormData(prev => ({
         ...prev,
@@ -237,22 +292,24 @@ const DocumentProcessorForm: React.FC = () => {
         temperature: temperature as number,
         model: String(model),
         selectedPages: Array.from(
-          { length: data.pdf_file.page_count },
+          { length: pdfFile.page_count },
           (_, i) => i + 1
         )
       }));
 
       setOutputConfig(
-        {
+        ({
           outputType: "init_from_sharepoint",
           sharepointFolder: folderName,
-          rowID: row_id,
+          row_id: row_id,
           filename: xlsxFilename,
-          siteName
-        }
-      )
+          siteName,
+          batch_mode: false,
+        } as any)
+      );
 
       setInitializedFromUrl(true);
+
     } catch (err: any) {
       console.error('Init from SharePoint error:', err);
       setInitError(err.message || 'Failed to load data from SharePoint URL.');
@@ -519,7 +576,7 @@ const DocumentProcessorForm: React.FC = () => {
   };
 
 
-  const processPage = async (jobId: string, pageNumber: number) => {
+  const processPage = async (jobId: string, pageNumber: number, originalFileName: string) => {
     console.log(fileInfo)
     const response = await fetch(`${BACKEND_URL}/process_page`, {
       method: 'POST',
@@ -527,7 +584,7 @@ const DocumentProcessorForm: React.FC = () => {
       body: JSON.stringify({
         job_id: jobId,
         page_number: pageNumber,
-        original_file_name: fileInfo ? fileInfo.filename : 'No file'
+        original_file_name:  originalFileName
       }),
     });
 
@@ -539,15 +596,140 @@ const DocumentProcessorForm: React.FC = () => {
     return await response.json();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!fileInfo?.file_id || formData.selectedPages.length === 0) return;
+    const isBatch = !!(batchFiles && batchFiles.length > 0);
+
+    // Single-file validation
+    if (!isBatch) {
+      if (!fileInfo?.file_id || formData.selectedPages.length === 0) return;
+    }
 
     try {
       setIsProcessing(true);
       setProcessingError(null);
       setProcessedPages([]);
+      setWasFallback(false);
+
+      // -------------------------
+      // Batch (folder) mode
+      // -------------------------
+      if (isBatch && batchFiles) {
+        const outCfg = { ...(outputConfig as any), batch_mode: true };
+
+        setTotalFiles(batchFiles.length);
+        setTotalPages(batchTotalPages);
+
+        const batchJobIds: string[] = [];
+
+        for (let fi = 0; fi < batchFiles.length; fi++) {
+          const f = batchFiles[fi];
+
+          setCurrentFileIndex(fi);
+          setCurrentFileName(f.filename);
+          setCurrentFilePagesTotal(f.page_count);
+          setCurrentFilePagesDone(0);
+
+          const pages = Array.from({ length: f.page_count }, (_, i) => i + 1);
+
+          const resp = await fetch(`${BACKEND_URL}/process`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              role: formData.role,
+              task: formData.task,
+              context: formData.context,
+              format: formData.format,
+              constraints: formData.constraints,
+              temperature: formData.temperature,
+              model: formData.model,
+              file_id: f.file_id,
+              selected_pages: pages,
+              output_config: outCfg,
+              original_file_name: f.filename,
+              file_stem: f.file_stem,
+            }),
+          });
+
+          if (!resp.ok) {
+            const msg = await resp.text().catch(() => '');
+            throw new Error(msg || `Processing failed with status ${resp.status}`);
+          }
+
+          const jobInit = await resp.json();
+          if (!jobInit?.success || !jobInit?.job_id) {
+            throw new Error(jobInit?.error || 'No job id returned.');
+          }
+
+          const jobId = jobInit.job_id as string;
+          batchJobIds.push(jobId);
+
+          for (const pageNumber of pages) {
+            const pageResult = await processPage(jobId, pageNumber, f.filename);
+
+            if (!pageResult.success) {
+              throw new Error(pageResult.error || `Failed to process page ${pageNumber} of ${f.filename}`);
+            }
+
+            setProcessedPages(prev => [
+              ...prev,
+              { page: pageResult.page, gpt_response: pageResult.gpt_response, image_size_bytes: pageResult.image_size_bytes }
+            ]);
+
+            setCurrentFilePagesDone(prev => prev + 1);
+          }
+        }
+
+        // Finalize into ONE XLSX
+        const finalizeResp = await fetch(`${BACKEND_URL}api/finalize_batch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            job_ids: batchJobIds,
+            output_config: { ...(outputConfig as any), batch_mode: true },
+          }),
+        });
+
+        if (!finalizeResp.ok) {
+          const msg = await finalizeResp.text().catch(() => '');
+          throw new Error(msg || `Finalize failed with status ${finalizeResp.status}`);
+        }
+
+        const finalData = await finalizeResp.json();
+
+        if (!finalData.success) {
+          throw new Error(finalData.error || 'Batch finalize failed.');
+        }
+
+        if ((outputConfig.outputType === 'browser') && finalData.xlsx_download_url) {
+          const absolute = `${BACKEND_URL}${finalData.xlsx_download_url}`;
+          await downloadCsv(absolute, finalData.xlsx_filename);
+          setShowSuccessModal(true);
+        } else if (outputConfig.outputType === 'sharepoint' || outputConfig.outputType === 'init_from_sharepoint') {
+          if (finalData.fallback && finalData.xlsx_download_url) {
+            setWasFallback(true);
+            const absolute = `${BACKEND_URL}${finalData.xlsx_download_url}`;
+            await downloadCsv(absolute, finalData.xlsx_filename);
+          }
+          setShowSuccessModal(true);
+        } else {
+          setShowSuccessModal(true);
+        }
+
+        setIsProcessing(false);
+        return;
+      }
+
+      // -------------------------
+      // Single-file mode (existing)
+      // -------------------------
+      setTotalFiles(1);
+      setCurrentFileIndex(0);
+      setCurrentFileName(fileInfo?.filename || '');
+      setCurrentFilePagesTotal(formData.selectedPages.length);
+      setCurrentFilePagesDone(0);
+
       setTotalPages(formData.selectedPages.length);
 
       const response = await fetch(`${BACKEND_URL}/process`, {
@@ -561,9 +743,11 @@ const DocumentProcessorForm: React.FC = () => {
           constraints: formData.constraints,
           temperature: formData.temperature,
           model: formData.model,
-          file_id: fileInfo.file_id,
+          file_id: fileInfo!.file_id,
           selected_pages: formData.selectedPages,
           output_config: outputConfig,
+          original_file_name: fileInfo?.filename,
+          file_stem: fileInfo?.filename ? fileInfo.filename.split('.').slice(0, -1).join('.') : undefined,
         }),
       });
 
@@ -578,49 +762,40 @@ const DocumentProcessorForm: React.FC = () => {
       }
 
       const sortedPages = [...formData.selectedPages].sort((a, b) => a - b);
-      
+
       for (const pageNumber of sortedPages) {
-        try {
-          console.log(`Processing page ${pageNumber}...`);
-          const pageResult = await processPage(data.job_id, pageNumber);
-          
-          if (!pageResult.success) {
-            throw new Error(pageResult.error || `Failed to process page ${pageNumber}`);
-          }
+        const pageResult = await processPage(data.job_id, pageNumber, fileInfo!.filename);
 
-          setProcessedPages(prev => [...prev, {
-            page: pageResult.page,
-            gpt_response: pageResult.gpt_response,
-            image_size_bytes: pageResult.image_size_bytes
-          }]);
+        if (!pageResult.success) {
+          throw new Error(pageResult.error || `Failed to process page ${pageNumber}`);
+        }
 
-          if (pageResult.is_last_page) {
-            console.log('Last page processed, downloading CSV');
-            
-            if (outputConfig.outputType === 'browser' && pageResult.xlsx_download_url) {
+        setProcessedPages(prev => [...prev, {
+          page: pageResult.page,
+          gpt_response: pageResult.gpt_response,
+          image_size_bytes: pageResult.image_size_bytes
+        }]);
+
+        setCurrentFilePagesDone(prev => prev + 1);
+
+        if (pageResult.is_last_page) {
+          if (outputConfig.outputType === 'browser' && pageResult.xlsx_download_url) {
+            const absolute = `${BACKEND_URL}${pageResult.xlsx_download_url}`;
+            await downloadCsv(absolute, pageResult.xlsx_filename);
+            setShowSuccessModal(true);
+          } else if (outputConfig.outputType === 'sharepoint' || outputConfig.outputType === 'init_from_sharepoint') {
+            if (pageResult.fallback) {
+              setWasFallback(true);
               const absolute = `${BACKEND_URL}${pageResult.xlsx_download_url}`;
-              try {
-                await downloadCsv(absolute, pageResult.xlsx_filename);
-                setShowSuccessModal(true);
-              } catch (e) {
-                console.error(e);
-                setProcessingError(e instanceof Error ? e.message : String(e));
-              }
-            } else if (outputConfig.outputType === 'sharepoint' || outputConfig.outputType === 'init_from_sharepoint') {
-              if(pageResult.fallback) {
-                setWasFallback(true)
-              }
-              setShowSuccessModal(true);
+              await downloadCsv(absolute, pageResult.xlsx_filename);
             }
-            
-            setIsProcessing(false);
-            break;
+            setShowSuccessModal(true);
+          } else {
+            setShowSuccessModal(true);
           }
-        } catch (pageError) {
-          console.error(`Error processing page ${pageNumber}:`, pageError);
-          setProcessingError(pageError instanceof Error ? pageError.message : String(pageError));
+
           setIsProcessing(false);
-          throw pageError;
+          break;
         }
       }
 
@@ -632,7 +807,7 @@ const DocumentProcessorForm: React.FC = () => {
     }
   };
 
-
+  console.log('batch files', batchFiles)
 
   const inputStyle = {
     width: 'calc(100% - 50px)',
@@ -1242,8 +1417,8 @@ if (isInitializing) {
       </div>
       }
 
-      {/* Page Selection - Only show if file is uploaded */}
-      {fileInfo && (
+      {/* Page Selection - hide in folder mode (batchFiles) */}
+      {fileInfo && !batchFiles && (
         <div style={{ marginBottom: '32px' }}>
           <label style={labelStyle}>📄 Pages (Total: {fileInfo.page_count})</label>
           
@@ -1329,11 +1504,21 @@ if (isInitializing) {
           </p>
         </div>
       )}
-
+      {batchFiles && (
+        <div style={{ marginBottom: '24px', padding: '16px', borderRadius: '12px', background: colors.primary.white, border: `1px solid ${colors.primary.lightBlue}` }}>
+          <strong>SharePoint folder mode</strong>
+          <div style={{ marginTop: 6, color: colors.tertiary.blueGrey, fontSize: 14 }}>
+            Files: {batchFiles.length} • Total pages: {batchTotalPages}
+          </div>
+          <div style={{ marginTop: 6, color: colors.tertiary.lightGrey, fontSize: 12 }}>
+            Output will be combined into a single XLSX with an extra “Filename stem” column.
+          </div>
+        </div>
+      )}
       {/* Submit Button */}
       <button
         type="submit"
-        disabled={!fileInfo || formData.selectedPages.length === 0 || isProcessing}
+        disabled={(batchFiles ? batchFiles.length === 0 : (!fileInfo || formData.selectedPages.length === 0)) || isProcessing}
         style={{
           width: '100%',
           padding: '16px',
@@ -1397,7 +1582,19 @@ if (isInitializing) {
         color: colors.tertiary.blueGrey 
       }}>
         <div>
-          <strong>{percent()}%</strong> - Pages: {processedPages.length} / {totalPages}
+          <div>
+            <strong>{percent()}%</strong> - Pages: {processedPages.length} / {totalPages}
+            {batchFiles && (
+              <>
+                <div style={{ marginTop: 6 }}>
+                  Files: {currentFileIndex + 1} / {totalFiles} — <strong>{currentFileName}</strong>
+                </div>
+                <div>
+                  Current file pages: {currentFilePagesDone} / {currentFilePagesTotal}
+                </div>
+              </>
+            )}
+          </div>
         </div>
         <button
           type="button"

@@ -244,7 +244,7 @@ const ProcessingDetailsModal: React.FC<ProcessingDetailsModalProps> = ({
             }}>
               {processedPages.map((r, idx) => (
                 <div 
-                  key={r.page} 
+                  key={r.page * 1000 + idx} 
                   style={{ 
                     marginBottom: idx < processedPages.length - 1 ? '16px' : 0,
                     padding: '16px',

@@ -13,7 +13,7 @@ export interface OutputConfig {
   filename?: string;
   contextId?: string;
   siteName?: string;
-  rowID?: number | string;
+  row_id?: number | string;
 }
 
 interface FolderNode {

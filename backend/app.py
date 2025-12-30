@@ -2,6 +2,7 @@ from flask_cors import CORS
 import os
 from werkzeug.utils import secure_filename
 import PyPDF2
+import csv, re, unicodedata
 
 import sys
 from pathlib import Path
@@ -474,6 +475,52 @@ def _at_excel_cell_limit(value, limit: int = EXCEL_CELL_CHAR_LIMIT) -> bool:
         text = f"{value}"
     return len(text) >= limit
 
+
+def _download_sp_file_to_upload(ctx, sp_file_path: str, original_filename: str) -> dict:
+    """
+    Download a SharePoint file (sp_file_path) into uploads/<uuid>/,
+    normalize to uploads/<uuid>/document.pdf (converts if needed),
+    and return {file_id, filename, page_count, file_stem}.
+    """
+    upload_id = str(uuid.uuid4())
+    dest_dir = UPLOAD_ROOT / upload_id
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    safe_name = secure_filename(original_filename) or "original"
+    original_path = dest_dir / safe_name
+
+    def _save_from_stream(file_stream):
+        file_stream.seek(0)
+        with open(original_path, "wb") as f:
+            f.write(file_stream.read())
+        return True
+
+    try:
+        # Downloads file and calls custom_function with a BytesIO
+        sharepoint_import_excel(
+            ctx,
+            sp_file_path,
+            sheet=None,
+            custom_function=_save_from_stream
+        )
+
+        # Normalize/convert to document.pdf so the rest of the app behaves like /upload
+        canonical_pdf = _ensure_pdf_in_folder(original_path, dest_dir)
+
+        with open(str(canonical_pdf), "rb") as f:
+            page_count = len(PdfReader(f).pages)
+
+        return {
+            "file_id": upload_id,
+            "filename": original_filename,
+            "page_count": page_count,
+            "file_stem": Path(original_filename).stem,
+        }
+    except Exception:
+        shutil.rmtree(dest_dir, ignore_errors=True)
+        raise
+
+
 @app.route("/api/init_from_sharepoint", methods=["POST"])
 def init_from_sharepoint():
     """
@@ -503,10 +550,10 @@ def init_from_sharepoint():
         if forceError:
             raise ValueError("Testing What happens when we force an error")
 
-        if not (folderName and xlsxFilename and pdfFilename):
+        if not (folderName and xlsxFilename):
             return jsonify({
                 "success": False,
-                "error": "folderName, xlsxFilename and pdfFilename are required"
+                "error": "folderName and xlsxFilename are required"
             }), 400
 
         # These defaults mirror the rest of your app
@@ -581,78 +628,129 @@ def init_from_sharepoint():
             # Excel truncates at exactly 32,767 characters; use >= for safety
             if _at_excel_cell_limit(cell_value, EXCEL_CELL_CHAR_LIMIT):
                 excel_limit_hits[field_name] = len(str(cell_value))
+        # ---- 4. Download PDF(s) from SharePoint into uploads/ ------------
 
-        # ---- 4. Download the file from SharePoint into uploads/ ------------
+        # Decide whether pdfFilename is a file or a folder.
+        # If pdfFilename is missing, treat folderName as the folder of PDFs.
+        pdf_target = pdfFilename  # may be None
 
-        # We'll create a new upload_id and directory, exactly like /upload
-        upload_id = str(uuid.uuid4())
-        dest_dir = UPLOAD_ROOT / upload_id
-        dest_dir.mkdir(parents=True, exist_ok=True)
-
-        original_ext = Path(pdfFilename).suffix.lower() or ".pdf"
-        original_path = dest_dir / f"original{original_ext}"
-        canonical_pdf = dest_dir / "document.pdf"
-
-        def _save_pdf_from_stream(file_stream):
-            """
-            custom_function for sharepoint_import_excel:
-            receives a BytesIO, writes it to original_path, and also
-            copies it as document.pdf. The return value is ignored.
-            """
+        pdf_is_file = False
+        if pdf_target:
             try:
-                file_stream.seek(0)
-                with open(original_path, "wb") as f:
-                    f.write(file_stream.read())
-                # Normalise name to document.pdf so the rest of the pipeline
-                # behaves exactly like the manual /upload path.
-                shutil.copy2(str(original_path), str(canonical_pdf))
-            except Exception as e_inner:
-                print("Error saving PDF from SharePoint stream:", e_inner)
-                raise
-            return True  # value unused; sharepoint_import_excel just returns it
+                pdf_is_file = bool(sharepoint_file_exists(ctx, folderName, pdf_target))
+            except Exception:
+                pdf_is_file = False
 
-        try:
-            # Despite the name, sharepoint_import_excel just downloads the file
-            # and passes the BytesIO to custom_function when provided.
-            sharepoint_import_excel(
-                ctx,
-                pdf_filepath,
-                sheet=None,
-                custom_function=_save_pdf_from_stream
-            )
-            print('successfully imported pdf from sharepoint')
-        except Exception as e:
-            shutil.rmtree(dest_dir, ignore_errors=True)
-            tb = traceback.format_exc()
-            print("!" * 80)
-            print("Error downloading PDF from SharePoint in init_from_sharepoint")
-            print(tb)
+        # ---- Single file mode (backwards compatible) ----
+        if pdf_is_file:
+            sp_file_path = f"{folderName.rstrip('/')}/{pdf_target}".replace("//", "/")
+            try:
+                one = _download_sp_file_to_upload(ctx, sp_file_path, pdf_target)
+            except Exception as e:
+                tb = traceback.format_exc()
+                print("!" * 80)
+                print("Error downloading single PDF from SharePoint in init_from_sharepoint")
+                print(tb)
+                return jsonify({
+                    "success": False,
+                    "error": f"Failed to download PDF from SharePoint: {e}"
+                }), 500
+
+            page_count = one["page_count"]
+            upload_id = one["file_id"]
+
+            return jsonify({
+                "success": True,
+                "mode": "file",
+                "pdf_file": {
+                    "success": True,
+                    "filename": normalize(one["filename"]),
+                    "page_count": page_count,
+                    "file_id": normalize(upload_id),
+                },
+                "prompt": {
+                    "role":        normalize(role_val),
+                    "task":        normalize(task_val),
+                    "context":     normalize(context_val),
+                    "format":      normalize(format_val),
+                    "constraints": normalize(constraints_val),
+                },
+                "excel_limit_hits": excel_limit_hits,
+            }), 200
+
+        # ---- Folder mode ----
+        # Folder to scan:
+        # - If pdfFilename was provided but isn't a file, interpret it as a subfolder name/path.
+        # - Else scan folderName itself.
+        if pdf_target:
+            pdf_folder = f"{folderName.rstrip('/')}/{pdf_target}".replace("//", "/")
+        else:
+            pdf_folder = folderName.rstrip("/")
+
+        # Ensure folder exists
+        if not sharepoint_folder_exists(ctx, pdf_folder):
             return jsonify({
                 "success": False,
-                "error": f"Failed to download PDF from SharePoint: {e}"
-            }), 500
+                "error": f"PDF folder not found on SharePoint: {pdf_folder}"
+            }), 404
 
-        if not canonical_pdf.exists():
-            shutil.rmtree(dest_dir, ignore_errors=True)
+        # List children and keep PDFs only
+        children = list_children(ctx, pdf_folder)
+        pdf_files = [f for f in children.get("files", []) if str(f.get("name", "")).lower().endswith(".pdf")]
+
+        # If you truly meant "all Office docs", change the filter above to:
+        #   endswith((".pdf", ".docx", ".doc", ".pptx", ".ppt"))
+        # but be careful to exclude your prompt XLSX.
+
+        if not pdf_files:
             return jsonify({
                 "success": False,
-                "error": "Downloaded PDF file not found after saving"
-            }), 500
+                "error": f"No PDF files found in SharePoint folder: {pdf_folder}"
+            }), 404
 
-        try:
-            with open(str(canonical_pdf), "rb") as f:
-                page_count = len(PdfReader(f).pages)
-                print(f'The pdf has {page_count} pages')
-        except Exception as e:
-            shutil.rmtree(dest_dir, ignore_errors=True)
-            tb = traceback.format_exc()
-            print("!" * 80)
-            print("Error counting PDF pages in init_from_sharepoint")
-            print(tb)
-            return jsonify({
-                "success": False,
-                "error": f"Failed to read PDF pages: {e}"
-            }), 500
+        # Deterministic order
+        pdf_files = sorted(pdf_files, key=lambda x: str(x.get("name", "")).lower())
+
+        downloaded = []
+        for f in pdf_files:
+            name = f["name"]
+            sp_file_path = f"{pdf_folder.rstrip('/')}/{name}".replace("//", "/")
+            try:
+                info = _download_sp_file_to_upload(ctx, sp_file_path, name)
+                downloaded.append({
+                    "success": True,
+                    "filename": normalize(info["filename"]),
+                    "page_count": int(info["page_count"]),
+                    "file_id": normalize(info["file_id"]),
+                    "file_stem": normalize(info["file_stem"]),
+                })
+            except Exception as e:
+                tb = traceback.format_exc()
+                print("!" * 80)
+                print(f"Error downloading file {name} from folder {pdf_folder}")
+                print(tb)
+                return jsonify({
+                    "success": False,
+                    "error": f"Failed downloading '{name}': {e}"
+                }), 500
+
+        # Return first file as pdf_file for minimal backward compatibility,
+        # but also include the full list as pdf_files.
+        return jsonify({
+            "success": True,
+            "mode": "folder",
+            "pdf_file": downloaded[0],
+            "pdf_files": downloaded,
+            "pdf_folder": pdf_folder,
+            "prompt": {
+                "role":        normalize(role_val),
+                "task":        normalize(task_val),
+                "context":     normalize(context_val),
+                "format":      normalize(format_val),
+                "constraints": normalize(constraints_val),
+            },
+            "excel_limit_hits": excel_limit_hits,
+        }), 200
 
         # ---------------------------------------------------------------------
         # 5. Return response identical in shape to manual upload + prompts
@@ -921,6 +1019,10 @@ def process_document():
     file_id = data.get('file_id', '')
     selected_pages = data.get('selected_pages', [])
     output_config = data.get('output_config', {'outputType': 'browser'})
+    original_file_name = data.get('original_file_name')
+    file_stem = data.get('file_stem')
+    print('output_config received in process and saved to job:')
+    print(output_config)
 
     # Validate inputs
     if not file_id:
@@ -951,6 +1053,8 @@ def process_document():
     state['output_config'] = output_config
     state['system_prompt'] = system_prompt
     state['user_prompt'] = user_prompt
+    state['original_file_name'] = original_file_name
+    state['file_stem'] = file_stem
     state['status'] = 'ready'
     
     with _JOBS_LOCK:
@@ -1009,6 +1113,8 @@ def process_page():
         user_prompt = job.get('user_prompt')
         model = job.get('model')
         output_config = job.get('output_config', {'outputType': 'browser'})
+        print('output_config read from job in process_page')
+        print(output_config)
         if not job.get("processing_started_at"):
             job["processing_started_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -1089,10 +1195,17 @@ def process_page():
         }
         
         # If last page, write CSV and delete table
+        # If last page, either:
+        #  - batch_mode: do NOT write XLSX yet (we'll finalize once all files finish)
+        #  - normal: write XLSX now
         if is_last_page:
+            batch_mode = bool((output_config or {}).get("batch_mode"))
+            if batch_mode:
+                result["note"] = "File completed (batch mode). Waiting for finalization."
+                result["batch_mode"] = True
+                return jsonify(result), 200
             print(f'[/process_page] Last page reached, writing CSV file')
             try:
-                import csv, re, unicodedata
                 # Get all results from database
                 all_results = get_all_page_results(job_id)
                 
@@ -1298,6 +1411,205 @@ def process_page():
             'success': False,
             'error': str(e)
         }), 500
+
+
+@app.route("/api/finalize_batch", methods=["POST"])
+def finalize_batch():
+    """
+    Combine results from multiple job_ids into ONE dataframe and output ONE XLSX.
+    Adds an extra column "Filename stem".
+    """
+    try:
+        data = request.get_json(force=True)
+        job_ids = data.get("job_ids") or []
+        output_config = data.get("output_config") or {"outputType": "browser"}
+
+        if not isinstance(job_ids, list) or not job_ids:
+            return jsonify({"success": False, "error": "job_ids must be a non-empty list"}), 400
+
+        # Collect (file_stem, original_file_name, page, gpt_response) rows in job_ids order
+        flat_rows = []
+        processing_ts_candidates = []
+
+        with _JOBS_LOCK:
+            jobs_snapshot = {jid: _JOBS.get(jid, {}) for jid in job_ids}
+
+        for jid in job_ids:
+            job = jobs_snapshot.get(jid, {}) or {}
+            file_stem = job.get("file_stem") or Path(job.get("original_file_name") or "").stem or jid[:8]
+            original_file_name = job.get("original_file_name") or file_stem
+            ts = job.get("processing_started_at")
+            if ts:
+                processing_ts_candidates.append(ts)
+
+            all_results = get_all_page_results(jid)  # [(page, gpt_response, ...?) but you store (page,gpt_response)]
+            if not all_results:
+                continue
+
+            df_raw = pd.DataFrame(all_results, columns=["page", "gpt_response"])
+            for _, r in df_raw.iterrows():
+                flat_rows.append((file_stem, original_file_name, int(r["page"]), r["gpt_response"]))
+
+        if not flat_rows:
+            return jsonify({"success": False, "error": "No results found for provided job_ids"}), 500
+
+        # Use earliest processing timestamp if available
+        processing_ts = min(processing_ts_candidates) if processing_ts_candidates else datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        TARGET_CHARS_PER_CHUNK = 26140
+
+        def _safe_len(x) -> int:
+            try:
+                return len(x) if isinstance(x, str) else len(str(x))
+            except Exception:
+                return 0
+
+        df_clean_list = []
+        chunk_id = 1
+        chunk_sum = 0
+
+        for (file_stem, original_file_name, page, text) in flat_rows:
+            text_len = _safe_len(text)
+
+            if chunk_sum > 0 and (chunk_sum + text_len) > TARGET_CHARS_PER_CHUNK:
+                dist_if_break = TARGET_CHARS_PER_CHUNK - chunk_sum
+                dist_if_keep  = (chunk_sum + text_len) - TARGET_CHARS_PER_CHUNK
+                if dist_if_break <= dist_if_keep:
+                    chunk_id += 1
+                    chunk_sum = 0
+
+            chunk_sum += text_len
+
+            df_clean_list.append({
+                "timestamp": processing_ts,
+                "chunk": chunk_id,
+                "Filename stem": file_stem,
+                "Data reference": None,
+                "Brief description (optional)": f"Page {page}",
+                "Source (optional)": original_file_name,
+                "Data": text
+            })
+
+        df = pd.DataFrame(df_clean_list)
+
+        # ---- Clean text to avoid control chars / normalization issues ----
+        import unicodedata, re as _re
+        _CTRL_RE = _re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")  # keep \t \n \r
+
+        def _clean_cell(x):
+            if isinstance(x, (bytes, bytearray)):
+                try:
+                    x = x.decode('utf-8')
+                except Exception:
+                    x = x.decode('utf-8', 'replace')
+            if isinstance(x, str):
+                x = unicodedata.normalize('NFC', x)
+                x = _CTRL_RE.sub('', x)
+            return x
+
+        df = df.map(_clean_cell)
+        # -----------------------------------------------------------------
+
+        out_type = (output_config or {}).get("outputType", "browser")
+        fallback = False
+        result = {"success": True}
+
+        if out_type == "init_from_sharepoint":
+            folder_name   = output_config.get("sharepointFolder")
+            xlsx_filename = output_config.get("filename")
+            row_id        = output_config.get("row_id")
+            site_name     = output_config.get("siteName")
+            tenant        = "tris42.onmicrosoft.com"
+            client_id     = "d44a05d5-c6a5-4bbb-82d2-443123722380"
+
+            if not (folder_name and xlsx_filename and row_id and site_name):
+                out_type = "browser"
+                fallback = True
+            else:
+                xlsx_stem = Path(xlsx_filename).stem
+                sp_out_folder = f"{folder_name.rstrip('/')}/pdf_output".replace("//", "/")
+                sp_out_name = f"{xlsx_stem}_pdf_folder_{row_id}.xlsx"
+
+                sp_site_url = f"https://tris42.sharepoint.com/sites/{site_name}/"
+                ctx = sharepoint_create_context(sp_site_url, tenant, client_id)
+
+                sharepoint_create_folder(ctx, sp_out_folder)
+                xlsx_io = _df_to_xlsx_bytesio(df)
+                ok = _sharepoint_upload_bytes_overwrite(ctx, sp_out_folder, sp_out_name, xlsx_io)
+
+                if ok:
+                    result["xlsx_filename"] = sp_out_name
+                    result["xlsx_download_url"] = None
+                    result["note"] = f"Uploaded to SharePoint: {sp_out_folder}/{sp_out_name}"
+                else:
+                    out_type = "browser"
+                    fallback = True
+
+        if out_type == "sharepoint":
+            context_id = output_config.get('contextId')
+            sharepoint_folder = output_config.get('sharepointFolder')
+            filename = output_config.get('filename', 'output.xlsx')
+
+            if not filename.lower().endswith(".xlsx"):
+                filename = f"{Path(filename).stem}.xlsx"
+
+            if not (context_id and sharepoint_folder):
+                out_type = "browser"
+                fallback = True
+            else:
+                def _upload_to_sharepoint():
+                    ctx = _new_ctx(context_id)
+                    sharepoint_create_folder(ctx, sharepoint_folder)
+                    xlsx_io = _df_to_xlsx_bytesio(df)
+                    return _sharepoint_upload_bytes_overwrite(ctx, sharepoint_folder, filename, xlsx_io)
+
+                try:
+                    future = EXECUTOR.submit(_upload_to_sharepoint)
+                    success = future.result(timeout=60)
+                    if success:
+                        result["xlsx_filename"] = filename
+                        result["xlsx_download_url"] = None
+                        result["note"] = "Uploaded XLSX to SharePoint"
+                    else:
+                        out_type = "browser"
+                        fallback = True
+                except Exception:
+                    out_type = "browser"
+                    fallback = True
+
+        if out_type == "browser":
+            batch_id = str(uuid.uuid4())
+            timestamp = datetime.now().strftime('%Y%m%dT%H%M%SZ')
+            xlsx_filename = secure_filename(f"gpt_responses_batch_{timestamp}.xlsx")
+            out_dir = UPLOAD_ROOT / batch_id
+            out_dir.mkdir(parents=True, exist_ok=True)
+            xlsx_path = out_dir / xlsx_filename
+
+            xlsx_io = _df_to_xlsx_bytesio(df)
+            with open(xlsx_path, "wb") as f:
+                f.write(xlsx_io.getvalue())
+
+            result["xlsx_filename"] = xlsx_filename
+            result["xlsx_download_url"] = f"/download/{batch_id}/{xlsx_filename}"
+            result["fallback"] = fallback
+
+        # Cleanup all job tables now that we've produced the combined output
+        for jid in job_ids:
+            try:
+                delete_page_results_table(jid)
+            except Exception:
+                traceback.print_exc()
+            with _JOBS_LOCK:
+                _JOBS.pop(jid, None)
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        print("!" * 80)
+        print("Unhandled error in finalize_batch")
+        print(tb)
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @app.route("/api/ping")
