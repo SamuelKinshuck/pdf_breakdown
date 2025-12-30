@@ -1365,11 +1365,7 @@ def root():
 
 
 try:
-    if os.getenv('REPL_ID') or os.getenv('REPLIT_DEV_DOMAIN'):
-        print('Running in Replit environment')
-        HOST = '0.0.0.0'
-        PORT = 8000
-    elif str(BASE_DIR).find('stgadfileshare001') != -1:
+    if str(BASE_DIR).find('stgadfileshare001') != -1:
         print('Running in stgadfileshare001 environment')
         HOST = '0.0.0.0'
         PORT = 8316

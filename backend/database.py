@@ -13,8 +13,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-DB_DIR = "./data"
-DB_PATH = os.path.join(DB_DIR, "prompts.db")
+try:
+    BASE_DIR = Path(__file__).resolve().parent
+except:
+    BASE_DIR = Path("C:/Users/SKinshuck/Desktop/pdf_breakdown2/pdf_breakdown/backend")
+
+if str(BASE_DIR).find('stgadfileshare001') == -1:
+    DB_DIR = "./data"
+    DB_PATH = os.path.join(DB_DIR, "prompts.db")
+else:
+    DB_DIR = Path('C:/Users/ast.dev.HMT/Desktop/format-cell-db').resolve()
+    DB_DIR.mkdir(parents=True, exist_ok=True)
+
+    DB_PATH = str((DB_DIR / "prompts.db").resolve())
+
+
 RETRYABLE_ERRORS = ("locked", "readonly", "busy")
 MAX_RETRIES = 5
 RETRY_DELAY = 0.5
