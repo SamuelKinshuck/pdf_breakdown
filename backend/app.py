@@ -634,12 +634,7 @@ def init_from_sharepoint():
         # If pdfFilename is missing, treat folderName as the folder of PDFs.
         pdf_target = pdfFilename  # may be None
 
-        pdf_is_file = False
-        if pdf_target:
-            try:
-                pdf_is_file = bool(sharepoint_file_exists(ctx, folderName, pdf_target))
-            except Exception:
-                pdf_is_file = False
+        pdf_is_file = isinstance(pdf_target, str) and pdf_target.endswith('.pdf')
 
         # ---- Single file mode (backwards compatible) ----
         if pdf_is_file:
