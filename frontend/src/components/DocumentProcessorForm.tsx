@@ -1658,7 +1658,11 @@ if (isInitializing) {
         onClose={() => setShowSuccessModal(false)}
         message= {wasFallback ? 
           "We could not upload the processed results to sharepoint, so they have been downloaded to your browser instead."
-          : "Your document has been successfully processed and the XLSX file has been downloaded!"}
+          : (outputConfig.outputType === "browser" ? 
+            "Your document has been successfully processed and the XLSX file has been downloaded to your browser!" :
+            "Your document has been successfully processed and the XLSX file has been saved to sharepoint!"
+          )
+          }
       />
 
       {/* Processing Details Modal */}
