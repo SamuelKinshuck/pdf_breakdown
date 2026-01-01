@@ -851,7 +851,7 @@ const handleSubmit = async (e: React.FormEvent) => {
     fontStyle: 'italic'
   };
 
-  const disableButton = (batchFiles ? batchFiles.length === 0 : (!fileInfo || formData.selectedPages.length === 0)) || isProcessing
+  const disableButton = !((batchFiles ? batchFiles.length === 0 : (!fileInfo || formData.selectedPages.length === 0)) || isProcessing)
 
   if(initError) {
     return(<p
