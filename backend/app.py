@@ -544,7 +544,6 @@ def init_from_sharepoint():
         pdfFilename  = data.get("pdfFilename")
         sheet        = data.get("sheet")
         row          = data.get("row")
-        row_id       = data.get("row_id")
         column       = data.get("column")
         forceError   = data.get('forceError')
         if forceError:
@@ -571,6 +570,7 @@ def init_from_sharepoint():
                 "success": False,
                 "error": "row and column must be integers"
             }), 400
+        
 
         # ---- 2. Create SharePoint context -----------------------------------
         sp_site_url = f"https://tris42.sharepoint.com/sites/{siteName}/"
@@ -579,6 +579,10 @@ def init_from_sharepoint():
         # Build file URLs/paths as used elsewhere in your app
         xlsx_filepath = folderName + "/" + xlsxFilename
         pdf_filepath  = folderName + "/" + pdfFilename
+        print(f'row: {row}')
+        print(f'column: {column}')
+        print(f'row_idx: {row_idx}')
+        print(f'xlsx filepath: {xlsx_filepath}')
         print(f'pdf filepath: {pdf_filepath}')
         
 
@@ -673,6 +677,8 @@ def init_from_sharepoint():
                 "excel_limit_hits": excel_limit_hits,
             }), 200
 
+        print('*' * 80)
+        print('looks like pdf is a folder, so scanning the whole folder')
         # ---- Folder mode ----
         # Folder to scan:
         # - If pdfFilename was provided but isn't a file, interpret it as a subfolder name/path.
@@ -693,9 +699,8 @@ def init_from_sharepoint():
         children = list_children(ctx, pdf_folder)
         pdf_files = [f for f in children.get("files", []) if str(f.get("name", "")).lower().endswith(".pdf")]
 
-        # If you truly meant "all Office docs", change the filter above to:
-        #   endswith((".pdf", ".docx", ".doc", ".pptx", ".ppt"))
-        # but be careful to exclude your prompt XLSX.
+        print('found these pdf_files: ')
+        print(pdf_files)
 
         if not pdf_files:
             return jsonify({
@@ -746,28 +751,6 @@ def init_from_sharepoint():
             },
             "excel_limit_hits": excel_limit_hits,
         }), 200
-
-        # ---------------------------------------------------------------------
-        # 5. Return response identical in shape to manual upload + prompts
-        # ---------------------------------------------------------------------
-        print('returning info to the backend')
-        return jsonify({
-                "success": True,
-                "pdf_file": {
-                    "success": True,
-                    "filename": normalize(pdfFilename),
-                    "page_count": page_count,
-                    "file_id": normalize(upload_id),
-                },
-                "prompt": {
-                    "role":        normalize(role_val),
-                    "task":        normalize(task_val),
-                    "context":     normalize(context_val),
-                    "format":      normalize(format_val),
-                    "constraints": normalize(constraints_val),
-                },
-                "excel_limit_hits": excel_limit_hits,
-            }), 200
 
     except Exception as e:
         tb = traceback.format_exc()
