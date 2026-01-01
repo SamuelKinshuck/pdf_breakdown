@@ -601,6 +601,9 @@ def init_from_sharepoint():
                 "error": f"Failed to import Excel from SharePoint: {e}"
             }), 500
 
+        print('*' * 80)
+        print('verbosely printing wholse dataframe')
+        [print(df.iloc[i]) for i in df.index]
         # We expect 5 consecutive rows: [role, task, context, format, constraints]
         try:
             slice_vals = df.iloc[row_idx:row_idx + 5, col_idx].tolist()
