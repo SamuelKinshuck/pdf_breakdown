@@ -1520,7 +1520,7 @@ if (isInitializing) {
       {/* Submit Button */}
       <button
         type="submit"
-        disabled={disableButton}
+        disabled={!disableButton}
         style={{
           width: '100%',
           padding: '16px',
