@@ -1509,7 +1509,7 @@ def finalize_batch():
             else:
                 xlsx_stem = Path(xlsx_filename).stem
                 sp_out_folder = f"{folder_name.rstrip('/')}/pdf_output".replace("//", "/")
-                sp_out_name = f"{xlsx_stem}_pdf_folder_{row_id}.xlsx"
+                sp_out_name = f"{xlsx_stem}_pdf_{row_id}.xlsx"
 
                 sp_site_url = f"https://tris42.sharepoint.com/sites/{site_name}/"
                 ctx = sharepoint_create_context(sp_site_url, tenant, client_id)
