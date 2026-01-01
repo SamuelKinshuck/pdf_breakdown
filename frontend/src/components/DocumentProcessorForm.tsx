@@ -851,6 +851,8 @@ const handleSubmit = async (e: React.FormEvent) => {
     fontStyle: 'italic'
   };
 
+  const disableButton = (batchFiles ? batchFiles.length === 0 : (!fileInfo || formData.selectedPages.length === 0)) || isProcessing
+
   if(initError) {
     return(<p
             style={{
@@ -1518,17 +1520,17 @@ if (isInitializing) {
       {/* Submit Button */}
       <button
         type="submit"
-        disabled={(batchFiles ? batchFiles.length === 0 : (!fileInfo || formData.selectedPages.length === 0)) || isProcessing}
+        disabled={disableButton}
         style={{
           width: '100%',
           padding: '16px',
-          backgroundColor: formData.selectedPages.length > 0 ? colors.secondary.green : colors.tertiary.lightGrey,
+          backgroundColor: disableButton ? colors.secondary.green : colors.tertiary.lightGrey,
           color: colors.primary.white,
           border: 'none',
           borderRadius: '12px',
           fontSize: '18px',
           fontWeight: '600',
-          cursor: formData.selectedPages.length > 0 ? 'pointer' : 'not-allowed',
+          cursor: disableButton ? 'pointer' : 'not-allowed',
           transition: 'background-color 0.3s ease',
           textTransform: 'uppercase',
           letterSpacing: '1px'
