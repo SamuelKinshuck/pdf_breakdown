@@ -756,7 +756,7 @@ def _write_feedback_backup_xlsx():
     backup_dir.mkdir(parents=True, exist_ok=True)
 
     ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ").replace(':', '-')
-    backup_path = ("../feedback_backup_" + ts + ".xlsx").resolve()
+    backup_path = "../feedback_backup_" + ts + ".xlsx"
 
     # Read all feedback rows
     with get_db_connection() as conn:
