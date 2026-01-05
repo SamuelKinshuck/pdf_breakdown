@@ -264,73 +264,57 @@ def _ensure_png_size(img_path: Path,
 
     return img_path
 
+from contextlib import contextmanager
 
-import tempfile
-def pdf_pages_to_images(pdf_path: Path, selected_pages: List, dpi: int = 200) -> List[Path]:
-    doc = fitz.open(pdf_path)
-    scale = dpi / 72
-    mtx = fitz.Matrix(scale, scale)
-    tmp = Path(tempfile.mkdtemp(prefix=f"{pdf_path.stem}_"))
-    paths: Dict[int, Path] = {}
-    for i, page in enumerate(doc):
-        if (i + 1) in selected_pages:
-            pix = page.get_pixmap(matrix=mtx)  # PNG by default with .save(...)
-            out = tmp / f"page_{i:04d}.png"
-            pix.save(out)                      # writes PNG bytes
-            _ensure_png_size(out)              # <-- use the PNG version
-            paths[i+1] = out
-    doc.close()
-    return paths
-
-def _images_from_pdf_path(pdf_path: str,
-                         selected_pages: List[int]) -> Dict[int, str]:
-    import tempfile, base64
-    from pathlib import Path
-    print(f"[_images_from_pdf_path] Starting image generation for {len(selected_pages)} pages from {pdf_path}")
+@contextmanager
+def rasterize_pdf_pages_to_temp_pngs(pdf_path: Path, pages: List[int], dpi: int = 200) -> Dict[int, Path]:
+    """
+    Rasterize selected PDF pages to PNGs in a TemporaryDirectory and ALWAYS clean it up.
+    Returns {page_number: png_path}.
+    """
     doc = None
-    temp_dir = None
+    tmp_obj = None
     try:
-        doc = fitz.open(pdf_path)
+        doc = fitz.open(str(pdf_path))
         max_page = len(doc)
-        pages_to_render = [p for p in selected_pages if 1 <= p <= max_page]
-        temp_dir = Path(tempfile.mkdtemp(prefix=f"{Path(pdf_path).stem}_"))
 
-        dpi = 72
-        scale = dpi / 72
+        pages_to_render = []
+        for p in pages:
+            try:
+                p_int = int(p)
+            except Exception:
+                continue
+            if 1 <= p_int <= max_page:
+                pages_to_render.append(p_int)
+
+        tmp_obj = tempfile.TemporaryDirectory(prefix=f"{pdf_path.stem}_")
+        tmp_dir = Path(tmp_obj.name)
+
+        scale = dpi / 72.0
         mtx = fitz.Matrix(scale, scale)
 
-        page_images_for_gpt: Dict[int, str] = {}
+        out: Dict[int, Path] = {}
+        for p in pages_to_render:
+            page = doc[p - 1]
+            pix = page.get_pixmap(matrix=mtx)
+            png_path = tmp_dir / f"page_{p:04d}.png"
+            pix.save(str(png_path))
+            _ensure_png_size(png_path)
+            out[p] = png_path
 
-        for page_number in pages_to_render:
-            try:
-                print(f"[_images_from_pdf_path] Rendering page {page_number}...")
-                page = doc[page_number - 1]
-                pix = page.get_pixmap(matrix=mtx)
-
-                png_path = temp_dir / f"page_{page_number:04d}.png"
-                pix.save(str(png_path))                 # keep PNG
-                _ensure_png_size(png_path)              # enforce size as PNG
-
-                with open(png_path, "rb") as image_file:
-                    b64 = base64.b64encode(image_file.read()).decode("utf-8")
-                data_url = f"data:image/png;base64,{b64}"  # <-- PNG mime
-
-                page_images_for_gpt[page_number] = data_url
-                print(f"[_images_from_pdf_path] Page {page_number} rendered successfully (base64 chars: {len(b64)})")
-            except Exception as e:
-                print(f"[_images_from_pdf_path] Error rasterizing page {page_number}: {e}")
-                page_images_for_gpt[page_number] = None
-
-        print(f"[_images_from_pdf_path] Completed image generation for {len(page_images_for_gpt)} pages")
-        return page_images_for_gpt
+        yield out
     finally:
         if doc is not None:
-            doc.close()
-            print(f"[_images_from_pdf_path] PDF document closed")
-        if temp_dir and temp_dir.exists():
-            import shutil
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            print(f"[_images_from_pdf_path] Cleaned up temporary directory")
+            try:
+                doc.close()
+            except Exception:
+                pass
+        if tmp_obj is not None:
+            try:
+                tmp_obj.cleanup()
+            except Exception:
+                pass
+
 
 
 def _pdf_path_for_file_id(file_id: str) -> str:
@@ -1089,61 +1073,64 @@ def process_page():
         # Resolve PDF path
         pdf_path = _pdf_path_for_file_id(file_id)
         
-        # Generate image for this specific page
-        img_paths = pdf_pages_to_images(Path(pdf_path), [int(page_number)])
-        images_for_gpt = _images_from_pdf_path(pdf_path, [page_number])
-        pre_compiled_image = images_for_gpt.get(page_number)
-        
-        if pre_compiled_image is None:
-            print(f'[/process_page] Page {page_number}: No image available')
-            gpt_response = 'Page image not available'
-            image_size_bytes = 0
-        else:
-            image_size_bytes = len(pre_compiled_image)
-            print(f'[/process_page] Page {page_number}: Image size = {image_size_bytes:,} bytes')
-            
-            # Call GPT API
-            if os.getenv('OPENAI_API_KEY') is None:
-                print(f'[/process_page] Page {page_number}: No API key found')
-                gpt_response = 'No API key found'
+        page_num = int(page_number)
+
+        # Rasterize exactly one page, and guarantee temp cleanup
+        with rasterize_pdf_pages_to_temp_pngs(Path(pdf_path), [page_num], dpi=200) as img_paths:
+            png_path = img_paths.get(page_num)
+
+            if png_path is None or not png_path.exists():
+                print(f'[/process_page] Page {page_num}: No image available')
+                gpt_response = 'Page image not available'
+                image_size_bytes = 0
             else:
-                try:
-                    import json
-                    print(f'[/process_page] Page {page_number}: Calling GPT API with function calling')
-                    
-                    raw_response = get_response_from_chatgpt_multiple_image_and_functions(
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        image_paths=[img_paths[int(page_number)]],
-                        model=model,
-                        functions=get_markdown_schema(),
-                        function_name='provide_markdown_response',
-                        pre_compiled_images=None
-                    )
-                    
-                    print(f'[/process_page] Page {page_number}: GPT API call successful, parsing response')
-                    
+                image_size_bytes = png_path.stat().st_size
+                print(f'[/process_page] Page {page_num}: PNG size = {image_size_bytes:,} bytes')
+
+                # Call GPT API
+                if os.getenv('OPENAI_API_KEY') is None:
+                    print(f'[/process_page] Page {page_num}: No API key found')
+                    gpt_response = 'No API key found'
+                else:
                     try:
-                        parsed = json.loads(raw_response)
-                        gpt_response = parsed.get('markdown_response', raw_response)
-                    except json.JSONDecodeError:
-                        print(f'[/process_page] Page {page_number}: Failed to parse JSON, using raw response')
-                        gpt_response = raw_response
-                    
-                    print(f'[/process_page] Page {page_number}: Response extracted successfully')
-                except BadRequestError:
-                    print(f'[/process_page] Page {page_number}: GPT refused to process')
-                    gpt_response = 'GPT refused to process this page'
-                except Exception as e:
-                    if 'timeout' in str(e).lower() or 'timed out' in str(e).lower():
-                        print(f'[/process_page] Page {page_number}: GPT API timeout')
-                        gpt_response = 'Timed out contacting GPT for this page'
-                    else:
-                        print(f'[/process_page] Page {page_number}: GPT API error: {e}')
-                        gpt_response = f'Unable to get a response from GPT for this page: {e}'
+                        import json
+                        print(f'[/process_page] Page {page_num}: Calling GPT API with function calling')
+
+                        raw_response = get_response_from_chatgpt_multiple_image_and_functions(
+                            system_prompt=system_prompt,
+                            user_prompt=user_prompt,
+                            image_paths=[str(png_path)], 
+                            model=model,
+                            functions=get_markdown_schema(),
+                            function_name='provide_markdown_response',
+                            pre_compiled_images=None
+                        )
+
+                        print(f'[/process_page] Page {page_num}: GPT API call successful, parsing response')
+
+                        try:
+                            parsed = json.loads(raw_response)
+                            gpt_response = parsed.get('markdown_response', raw_response)
+                        except json.JSONDecodeError:
+                            print(f'[/process_page] Page {page_num}: Failed to parse JSON, using raw response')
+                            gpt_response = raw_response
+
+                        print(f'[/process_page] Page {page_num}: Response extracted successfully')
+
+                    except BadRequestError:
+                        print(f'[/process_page] Page {page_num}: GPT refused to process')
+                        gpt_response = 'GPT refused to process this page'
+                    except Exception as e:
+                        if 'timeout' in str(e).lower() or 'timed out' in str(e).lower():
+                            print(f'[/process_page] Page {page_num}: GPT API timeout')
+                            gpt_response = 'Timed out contacting GPT for this page'
+                        else:
+                            print(f'[/process_page] Page {page_num}: GPT API error: {e}')
+                            gpt_response = f'Unable to get a response from GPT for this page: {e}'
+
         
         # Store result in SQL database
-        append_page_result(job_id, page_number, gpt_response, image_size_bytes)
+        append_page_result(job_id, int(page_number), gpt_response, image_size_bytes)
         print(f'[/process_page] Page {page_number}: Result stored in database')
         
         # Check if this is the last page (be robust to type mismatches / empty list)
