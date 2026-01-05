@@ -6,6 +6,7 @@ from typing import Dict, List, Any, Optional
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
+import json
 
 logging.basicConfig(
     level=logging.INFO,
@@ -475,4 +476,193 @@ def delete_page_results_table(job_id: str):
         cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
         logger.info(f"Deleted page results table: {table_name}")
 
+
+# ----------------------------
+# JOB METADATA (no in-RAM jobs)
+# ----------------------------
+
+def init_jobs_table():
+    """Initialize the jobs table if it doesn't exist."""
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                job_id TEXT PRIMARY KEY,
+                file_id TEXT NOT NULL,
+                model TEXT NOT NULL,
+                status TEXT NOT NULL,
+                error TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                system_prompt TEXT,
+                user_prompt TEXT,
+
+                output_config_json TEXT,   -- JSON string
+                selected_pages_json TEXT,  -- JSON string
+
+                original_file_name TEXT,
+                file_stem TEXT,
+
+                processing_started_at TEXT
+            )
+        """)
+        cursor.execute("""
+            CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at DESC)
+        """)
+        logger.info("Jobs table initialized successfully")
+
+
+def create_job(
+    job_id: str,
+    file_id: str,
+    model: str,
+    status: str,
+    system_prompt: str,
+    user_prompt: str,
+    selected_pages: List[int],
+    output_config: Dict[str, Any],
+    original_file_name: Optional[str] = None,
+    file_stem: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Insert a new job row."""
+    attempt = 0
+    while attempt < MAX_RETRIES:
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO jobs (
+                        job_id, file_id, model, status,
+                        system_prompt, user_prompt,
+                        output_config_json, selected_pages_json,
+                        original_file_name, file_stem
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    job_id,
+                    file_id,
+                    model,
+                    status,
+                    system_prompt,
+                    user_prompt,
+                    json.dumps(output_config or {}),
+                    json.dumps(sorted([int(p) for p in (selected_pages or [])])),
+                    original_file_name,
+                    file_stem,
+                ))
+                logger.info(f"Created job {job_id} for file_id={file_id}")
+                return {"success": True}
+        except sqlite3.IntegrityError as e:
+            # Shouldn't happen because job_id is UUID, but be safe
+            return {"success": False, "error": f"Job already exists: {e}"}
+        except sqlite3.OperationalError as e:
+            if any(err in str(e).lower() for err in RETRYABLE_ERRORS):
+                attempt += 1
+                logger.warning(f"Database locked, retry {attempt}/{MAX_RETRIES}: {e}")
+                time.sleep(RETRY_DELAY * attempt)
+            else:
+                return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    return {"success": False, "error": "Database is busy, please try again"}
+
+
+def get_job(job_id: str) -> Dict[str, Any]:
+    """Fetch a job row as dict; returns success False if not found."""
+    attempt = 0
+    while attempt < MAX_RETRIES:
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return {"success": False, "error": "Job not found"}
+
+                job = dict(row)
+
+                # Parse JSON fields safely
+                try:
+                    job["output_config"] = json.loads(job.get("output_config_json") or "{}")
+                except Exception:
+                    job["output_config"] = {}
+
+                try:
+                    job["selected_pages"] = json.loads(job.get("selected_pages_json") or "[]")
+                except Exception:
+                    job["selected_pages"] = []
+
+                return {"success": True, "job": job}
+        except sqlite3.OperationalError as e:
+            if any(err in str(e).lower() for err in RETRYABLE_ERRORS):
+                attempt += 1
+                logger.warning(f"Database locked, retry {attempt}/{MAX_RETRIES}: {e}")
+                time.sleep(RETRY_DELAY * attempt)
+            else:
+                return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    return {"success": False, "error": "Database is busy, please try again"}
+
+
+def touch_job_processing_started_at(job_id: str) -> Dict[str, Any]:
+    """
+    Ensure processing_started_at is set (only once), and return the timestamp value.
+    Safe under concurrency: only sets if currently NULL.
+    """
+    attempt = 0
+    while attempt < MAX_RETRIES:
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+
+                # Set if missing
+                now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+                cursor.execute("""
+                    UPDATE jobs
+                    SET processing_started_at = COALESCE(processing_started_at, ?),
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE job_id = ?
+                """, (now, job_id))
+
+                cursor.execute("SELECT processing_started_at FROM jobs WHERE job_id = ?", (job_id,))
+                row = cursor.fetchone()
+                if not row:
+                    return {"success": False, "error": "Job not found"}
+
+                return {"success": True, "processing_started_at": row[0] or now}
+        except sqlite3.OperationalError as e:
+            if any(err in str(e).lower() for err in RETRYABLE_ERRORS):
+                attempt += 1
+                logger.warning(f"Database locked, retry {attempt}/{MAX_RETRIES}: {e}")
+                time.sleep(RETRY_DELAY * attempt)
+            else:
+                return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    return {"success": False, "error": "Database is busy, please try again"}
+
+
+def delete_job(job_id: str) -> Dict[str, Any]:
+    """Delete job row."""
+    attempt = 0
+    while attempt < MAX_RETRIES:
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+                return {"success": True}
+        except sqlite3.OperationalError as e:
+            if any(err in str(e).lower() for err in RETRYABLE_ERRORS):
+                attempt += 1
+                logger.warning(f"Database locked, retry {attempt}/{MAX_RETRIES}: {e}")
+                time.sleep(RETRY_DELAY * attempt)
+            else:
+                return {"success": False, "error": str(e)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    return {"success": False, "error": "Database is busy, please try again"}
+
+
 init_prompts_table()
+init_jobs_table()

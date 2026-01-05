@@ -60,10 +60,18 @@ from backend.database import (
     search_prompts,
     get_prompt_by_id,
     delete_prompt,
+
+    # page results
     create_page_results_table,
     append_page_result,
     get_all_page_results,
-    delete_page_results_table
+    delete_page_results_table,
+
+    # job metadata
+    create_job,
+    get_job,
+    touch_job_processing_started_at,
+    delete_job,
 )
 from io import BytesIO
 
@@ -81,8 +89,6 @@ _CTX_CACHE_LOCK = threading.Lock()
 CTX_TTL_SECONDS = 300
 
 
-_JOBS: Dict[str, dict] = {}
-_JOBS_LOCK = threading.Lock()
 
 EXECUTOR = ThreadPoolExecutor(max_workers=3)
 
@@ -949,35 +955,7 @@ def upload_file():
         'file_id': upload_id
     })
 
-# -----------------------------------------------------------------------------
-# Helpers for async jobs
-# -----------------------------------------------------------------------------
-def _now_iso() -> str:
-    return datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
-def _init_job_state(job_id: str,
-                    file_id: str,
-                    selected_pages: List[int],
-                    model: str) -> dict:
-    # Keep the structure simple and serializable
-    return {
-        "job_id": job_id,
-        "file_id": file_id,
-        "model": model,
-        "status": "queued",                # queued | running | completed | error
-        "error": None,
-        "created_at": _now_iso(),
-        "updated_at": _now_iso(),
-        "started_at": None,
-        "finished_at": None,
-        "pages_total": len(selected_pages),
-        "selected_pages": sorted(selected_pages),
-        "pages_done": 0,
-        "last_page": None,
-        "rows": [],                        # list[{"page": int, "gpt_response": str}]
-        "csv_filename": None,
-        "csv_download_url": None,
-    }
 
 
 # -----------------------------------------------------------------------------
@@ -1027,20 +1005,28 @@ def process_document():
     system_prompt = 'you are a helpful assistant'
     user_prompt = _compose_user_prompt(role, task, context, format_field, constraints)
 
-    # Create job state
+    # Create job row in DB (NOT in RAM)
     job_id = str(uuid.uuid4())
     print(f'[/process] Created job {job_id} for file {file_id}')
-    state = _init_job_state(job_id, file_id, selected_pages, model)
-    state['output_config'] = output_config
-    state['system_prompt'] = system_prompt
-    state['user_prompt'] = user_prompt
-    state['original_file_name'] = original_file_name
-    state['file_stem'] = file_stem
-    state['status'] = 'ready'
-    
-    with _JOBS_LOCK:
-        _JOBS[job_id] = state
-        print(f'[/process] Active jobs: {len(_JOBS)}')
+
+    job_create = create_job(
+        job_id=job_id,
+        file_id=file_id,
+        model=model,
+        status="ready",
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        selected_pages=selected_pages,
+        output_config=output_config or {"outputType": "browser"},
+        original_file_name=original_file_name,
+        file_stem=file_stem,
+    )
+
+    if not job_create.get("success"):
+        return jsonify({
+            "success": False,
+            "error": job_create.get("error", "Failed to create job in DB")
+        }), 500
 
     # Create SQL table for page results
     try:
@@ -1079,25 +1065,25 @@ def process_page():
     
     print(f'[/process_page] Processing page {page_number} for job {job_id}')
     
-    # Get job state
-    with _JOBS_LOCK:
-        job = _JOBS.get(job_id)
-        if not job:
-            return jsonify({'success': False, 'error': 'Job not found'}), 404
-        
-        file_id = job.get('file_id')
-        
-        print('original_file_name')
-        print(original_file_name)
-        selected_pages = job.get('selected_pages', [])
-        system_prompt = job.get('system_prompt')
-        user_prompt = job.get('user_prompt')
-        model = job.get('model')
-        output_config = job.get('output_config', {'outputType': 'browser'})
-        print('output_config read from job in process_page')
-        print(output_config)
-        if not job.get("processing_started_at"):
-            job["processing_started_at"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Load job from DB
+    job_resp = get_job(job_id)
+    if not job_resp.get("success"):
+        return jsonify({"success": False, "error": job_resp.get("error", "Job not found")}), 404
+
+    job = job_resp["job"]
+
+    file_id = job.get("file_id")
+    selected_pages = job.get("selected_pages", []) or []
+    system_prompt = job.get("system_prompt")
+    user_prompt = job.get("user_prompt")
+    model = job.get("model")
+    output_config = job.get("output_config") or {"outputType": "browser"}
+    # keep original_file_name local too (used later)
+    original_file_name = job.get("original_file_name")
+
+    # Ensure processing_started_at is set in DB once
+    ts_resp = touch_job_processing_started_at(job_id)
+    processing_ts = ts_resp.get("processing_started_at") if ts_resp.get("success") else datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     try:
         # Resolve PDF path
@@ -1198,11 +1184,6 @@ def process_page():
                 
                 # Create DataFrame
                 df_raw = pd.DataFrame(all_results, columns=["page", "gpt_response"])
-
-                # Timestamp = start of processing for this job (same on every row)
-                with _JOBS_LOCK:
-                    job = _JOBS.get(job_id, {})
-                processing_ts = job.get("processing_started_at") or datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
                 TARGET_CHARS_PER_CHUNK = 26140
 
@@ -1368,7 +1349,8 @@ def process_page():
                 try:
                     print(f'[/process_page] Starting cleanup for job {job_id}')
                     delete_page_results_table(job_id)
-                    print(f'[/process_page] Deleted page results table for job {job_id}')
+                    delete_job(job_id)
+                    print(f'[/process_page] Deleted page results table and job table for job {job_id}')
                 except Exception as cleanup_error:
                     # Log but don't raise - cleanup failures shouldn't block CSV delivery
                     print(f'[/process_page] Warning: Cleanup failed for job {job_id}: {cleanup_error}')
@@ -1412,22 +1394,20 @@ def finalize_batch():
         flat_rows = []
         processing_ts_candidates = []
 
-        with _JOBS_LOCK:
-            jobs_snapshot = {jid: _JOBS.get(jid, {}) for jid in job_ids}
 
         for jid in job_ids:
-            job = jobs_snapshot.get(jid, {}) or {}
+            job_resp = get_job(jid)
+            job = job_resp.get("job") if job_resp.get("success") else {}
             file_stem = job.get("file_stem") or Path(job.get("original_file_name") or "").stem or jid[:8]
             original_file_name = job.get("original_file_name") or file_stem
             ts = job.get("processing_started_at")
             if ts:
                 processing_ts_candidates.append(ts)
 
-            all_results = get_all_page_results(jid)  # [(page, gpt_response, ...?) but you store (page,gpt_response)]
+            all_results = get_all_page_results(jid)
             if not all_results:
                 continue
-
-            df_raw = pd.DataFrame(all_results, columns=["page", "gpt_response"])
+            df_raw = pd.DataFrame(all_results)  # expects dicts with keys: page, gpt_response, image_size_bytes
             for _, r in df_raw.iterrows():
                 flat_rows.append((file_stem, original_file_name, int(r["page"]), r["gpt_response"]))
 
@@ -1580,8 +1560,10 @@ def finalize_batch():
                 delete_page_results_table(jid)
             except Exception:
                 traceback.print_exc()
-            with _JOBS_LOCK:
-                _JOBS.pop(jid, None)
+            try:
+                delete_job(jid)
+            except Exception:
+                traceback.print_exc()
 
         return jsonify(result), 200
 
