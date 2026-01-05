@@ -38,5 +38,21 @@ export function getBackendURL(): string {
   return '/';
 }
 
-// Export the backend URL
-export const BACKEND_URL = getBackendURL();
+
+// Join BACKEND_URL + path safely (no missing slash, no double slash)
+export function apiUrl(path: string): string {
+  const base = getBackendURL(); // keep existing behavior
+  const cleanBase =
+    base === '/' ? '' : String(base).replace(/\/+$/, ''); // '/' -> '' so we can prefix later
+  const cleanPath = String(path).replace(/^\/+/, '');
+
+  // Same-origin case
+  if (!cleanBase) return `/${cleanPath}`;
+
+  return `${cleanBase}/${cleanPath}`;
+}
+
+// Optional convenience wrapper
+export function apiFetch(path: string, init?: RequestInit) {
+  return fetch(apiUrl(path), init);
+}

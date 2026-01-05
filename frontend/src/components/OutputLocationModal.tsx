@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BACKEND_URL } from '../apiConfig';
+import { apiFetch } from '../apiConfig';
 
 interface OutputLocationModalProps {
   isOpen: boolean;
@@ -35,7 +35,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
   const [folderContents, setFolderContents] = useState<{ folders: FolderNode[], files: FileNode[] } | null>(null);
   const [folderHistory, setFolderHistory] = useState<string[]>([]);
   const [breadcrumbTrail, setBreadcrumbTrail] = useState<Array<{ name: string; path: string }>>([]);
-  const [filename, setFilename] = useState<string>('output.csv');
+  const [filename, setFilename] = useState<string>('output.xlsx');
   const [isLoadingFolder, setIsLoadingFolder] = useState(false);
   const [siteUrl, setSiteUrl] = useState<string>('https://tris42.sharepoint.com/sites/GADOpportunitiesandSolutions');
   const [rootFolder, setRootFolder] = useState<string>('/sites/GADOpportunitiesandSolutions');
@@ -72,7 +72,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
       setFolderContents(null);
       setFolderHistory([]);
       setBreadcrumbTrail([]);
-      setFilename('output.csv');
+      setFilename('output.xlsx');
     }
   }, [isOpen]);
 
@@ -80,7 +80,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
     setIsAuthenticating(true);
     setAuthError(null);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/context`, {
+      const response = await apiFetch('api/context', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -114,9 +114,9 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
     
     setIsLoadingFolder(true);
     try {
-      const response = await fetch(
-        `${BACKEND_URL}/api/folder/list?context_id=${ctx}&folder=${encodeURIComponent(folderPath)}`
-      );
+      const response = await apiFetch(
+      `api/folder/list?context_id=${encodeURIComponent(ctx)}&folder=${encodeURIComponent(folderPath)}`
+    );
       
       const data = await response.json();
       
@@ -206,8 +206,8 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
     if (outputType === 'browser') {
       onConfirm({ outputType: 'browser' });
     } else {
-      if (!filename.endsWith('.csv')) {
-        alert('Filename must end with .csv');
+      if (!filename.endsWith('.xlsx')) {
+        alert('Filename must end with .xlsx');
         return;
       }
       if (!currentFolder || !contextId) {
@@ -636,24 +636,24 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
                   fontSize: '15px'
                 }}>
                   <span style={{ fontSize: '18px' }}>✏️</span>
-                  Output Filename (must end with .csv):
+                  Output Filename (must end with .xlsx):
                 </label>
                 <input
                   type="text"
                   value={filename}
                   onChange={(e) => setFilename(e.target.value)}
                   disabled={!isSharePointMode}
-                  placeholder="output.csv"
+                  placeholder="output.xlsx"
                   style={{
                     width: '100%',
                     padding: '12px',
                     borderRadius: '8px',
-                    border: `2px solid ${filename.endsWith('.csv') ? colors.primary.lightBlue : colors.tertiary.red}`,
+                    border: `2px solid ${filename.endsWith('.xlsx') ? colors.primary.lightBlue : colors.tertiary.red}`,
                     fontSize: '14px',
                     backgroundColor: colors.primary.white
                   }}
                 />
-                {!filename.endsWith('.csv') && (
+                {!filename.endsWith('.xlsx') && (
                   <div style={{ 
                     marginTop: '6px',
                     fontSize: '13px',
@@ -663,7 +663,7 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
                     gap: '4px'
                   }}>
                     <span>⚠️</span>
-                    Filename must end with .csv
+                    Filename must end with .xlsx
                   </div>
                 )}
               </div>
@@ -698,18 +698,18 @@ const OutputLocationModal: React.FC<OutputLocationModalProps> = ({ isOpen, onClo
           <button
             type="button"
             onClick={handleConfirm}
-            disabled={outputType === 'sharepoint' && (!contextId || !filename.endsWith('.csv'))}
+            disabled={outputType === 'sharepoint' && (!contextId || !filename.endsWith('.xlsx'))}
             style={{
               flex: 1,
               padding: '14px 24px',
-              backgroundColor: (outputType === 'sharepoint' && (!contextId || !filename.endsWith('.csv'))) 
+              backgroundColor: (outputType === 'sharepoint' && (!contextId || !filename.endsWith('.xlsx'))) 
                 ? colors.tertiary.lightGrey 
                 : colors.secondary.green,
               color: colors.primary.white,
               borderRadius: '10px',
               border: 'none',
               fontWeight: '600',
-              cursor: (outputType === 'sharepoint' && (!contextId || !filename.endsWith('.csv'))) 
+              cursor: (outputType === 'sharepoint' && (!contextId || !filename.endsWith('.xlsx'))) 
                 ? 'not-allowed' 
                 : 'pointer',
               fontSize: '16px',

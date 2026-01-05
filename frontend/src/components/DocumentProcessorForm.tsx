@@ -6,7 +6,7 @@ import OutputLocationModal, { OutputConfig } from './OutputLocationModal';
 import ProcessingDetailsModal from './ProcessingDetailsModal';
 import SavePromptModal, { SavePromptData } from './SavePromptModal';
 import SearchPromptsModal, { SavedPrompt } from './SearchPromptsModal';
-import { BACKEND_URL } from '../apiConfig';
+import { apiFetch, apiUrl } from '../apiConfig';
 import AI from '../assets/ai.png'
 import PromptSummaryCompact from './PromptSummaryCompact';
 import ExcelLimitWarningModal from './ExcelLimitWarningModal';
@@ -158,16 +158,30 @@ const DocumentProcessorForm: React.FC = () => {
 
   
   const hasAnyInitParams = !!(folderName || xlsxFilename || siteName || pdfFilename || rawRowId || rawRow || rawColumn || rawTemperature);
+    // If no URL init params, stay in "manual upload" mode:
+  if (!hasAnyInitParams) {
+    setInitializedFromUrl(false);
+    setIsInitializing(false);
+    setInitError(null);
 
-const requiredParams: Array<{ key: string; present: boolean }> = [
-  { key: 'folderName',   present: !!folderName },
-  { key: 'xlsxFilename', present: !!xlsxFilename },
-  { key: 'siteName',     present: !!siteName },
-  { key: 'pdfFilename',  present: !!pdfFilename },
-  { key: 'rowID',        present: !!rawRowId },
-];
+    // Optional: reset any URL-init leftovers if user navigates back/forward
+    setBatchFiles(null);
+    setFileInfo(null);
+    setUploadError('');
 
-const missing = requiredParams.filter(p => !p.present).map(p => p.key);
+    setOutputConfig({ outputType: 'browser' });
+
+    return;
+  }
+  const requiredParams: Array<{ key: string; present: boolean }> = [
+    { key: 'folderName',   present: !!folderName },
+    { key: 'xlsxFilename', present: !!xlsxFilename },
+    { key: 'siteName',     present: !!siteName },
+    { key: 'pdfFilename',  present: !!pdfFilename },
+    { key: 'rowID',        present: !!rawRowId },
+  ];
+
+  const missing = requiredParams.filter(p => !p.present).map(p => p.key);
 
 if (hasAnyInitParams && missing.length > 0) {
   setInitError(
@@ -223,7 +237,7 @@ if (hasAnyInitParams && missing.length > 0) {
 
   const initFromSharepoint = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}api/init_from_sharepoint`, {
+      const response = await apiFetch('api/init_from_sharepoint', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -477,7 +491,7 @@ if (hasAnyInitParams && missing.length > 0) {
 
     try {
       console.log('contacting endpoint');
-      const response = await fetch(BACKEND_URL + 'upload', {
+      const response = await apiFetch('upload', {
         method: 'POST',
         body: formDataToSend, // Don't set Content-Type; the browser adds the boundary.
       });
@@ -513,7 +527,7 @@ if (hasAnyInitParams && missing.length > 0) {
 
   const handleSavePrompt = async (saveData: SavePromptData) => {
     try {
-      const response = await fetch(`${BACKEND_URL}api/prompts/save`, {
+      const response = await apiFetch('api/prompts/save', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -588,8 +602,7 @@ if (hasAnyInitParams && missing.length > 0) {
 
 
   const processPage = async (jobId: string, pageNumber: number, originalFileName: string) => {
-    console.log(fileInfo)
-    const response = await fetch(`${BACKEND_URL}/process_page`, {
+    const response = await apiFetch('process_page', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -644,7 +657,7 @@ const handleSubmit = async (e: React.FormEvent) => {
 
           const pages = Array.from({ length: f.page_count }, (_, i) => i + 1);
 
-          const resp = await fetch(`${BACKEND_URL}/process`, {
+          const resp = await apiFetch('process', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -693,7 +706,7 @@ const handleSubmit = async (e: React.FormEvent) => {
         }
 
         // Finalize into ONE XLSX
-        const finalizeResp = await fetch(`${BACKEND_URL}api/finalize_batch`, {
+        const finalizeResp = await apiFetch('api/finalize_batch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -714,13 +727,13 @@ const handleSubmit = async (e: React.FormEvent) => {
         }
 
         if ((outputConfig.outputType === 'browser') && finalData.xlsx_download_url) {
-          const absolute = `${BACKEND_URL}${finalData.xlsx_download_url}`;
+          const absolute = apiUrl(finalData.xlsx_download_url);
           await downloadCsv(absolute, finalData.xlsx_filename);
           setShowSuccessModal(true);
         } else if (outputConfig.outputType === 'sharepoint' || outputConfig.outputType === 'init_from_sharepoint') {
           if (finalData.fallback && finalData.xlsx_download_url) {
             setWasFallback(true);
-            const absolute = `${BACKEND_URL}${finalData.xlsx_download_url}`;
+            const absolute = apiUrl(finalData.xlsx_download_url);
             await downloadCsv(absolute, finalData.xlsx_filename);
           }
           setShowSuccessModal(true);
@@ -743,7 +756,7 @@ const handleSubmit = async (e: React.FormEvent) => {
 
       setTotalPages(formData.selectedPages.length);
 
-      const response = await fetch(`${BACKEND_URL}/process`, {
+      const response = await apiFetch('process', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -791,13 +804,13 @@ const handleSubmit = async (e: React.FormEvent) => {
 
         if (pageResult.is_last_page) {
           if (outputConfig.outputType === 'browser' && pageResult.xlsx_download_url) {
-            const absolute = `${BACKEND_URL}${pageResult.xlsx_download_url}`;
+            const absolute = apiUrl(pageResult.xlsx_download_url)
             await downloadCsv(absolute, pageResult.xlsx_filename);
             setShowSuccessModal(true);
           } else if (outputConfig.outputType === 'sharepoint' || outputConfig.outputType === 'init_from_sharepoint') {
             if (pageResult.fallback) {
               setWasFallback(true);
-              const absolute = `${BACKEND_URL}${pageResult.xlsx_download_url}`;
+              const absolute = apiUrl(pageResult.xlsx_download_url)
               await downloadCsv(absolute, pageResult.xlsx_filename);
             }
             setShowSuccessModal(true);
@@ -862,7 +875,7 @@ const handleSubmit = async (e: React.FormEvent) => {
     fontStyle: 'italic'
   };
 
-  const disableButton = !((batchFiles ? batchFiles.length === 0 : (!fileInfo || formData.selectedPages.length === 0)) || isProcessing)
+  const enableButton = !((batchFiles ? batchFiles.length === 0 : (!fileInfo || formData.selectedPages.length === 0)) || isProcessing)
 
   if(initError) {
     return(<p
@@ -1531,17 +1544,17 @@ if (isInitializing) {
       {/* Submit Button */}
       <button
         type="submit"
-        disabled={!disableButton}
+        disabled={!enableButton}
         style={{
           width: '100%',
           padding: '16px',
-          backgroundColor: disableButton ? colors.secondary.green : colors.tertiary.lightGrey,
+          backgroundColor: enableButton ? colors.secondary.green : colors.tertiary.lightGrey,
           color: colors.primary.white,
           border: 'none',
           borderRadius: '12px',
           fontSize: '18px',
           fontWeight: '600',
-          cursor: disableButton ? 'pointer' : 'not-allowed',
+          cursor: enableButton ? 'pointer' : 'not-allowed',
           transition: 'background-color 0.3s ease',
           textTransform: 'uppercase',
           letterSpacing: '1px'

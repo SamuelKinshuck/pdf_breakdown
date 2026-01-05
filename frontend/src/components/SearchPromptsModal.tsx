@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BACKEND_URL } from '../apiConfig';
+import { apiFetch } from '../apiConfig';
 
 interface SearchPromptsModalProps {
   isOpen: boolean;
@@ -90,7 +90,7 @@ const SearchPromptsModal: React.FC<SearchPromptsModalProps> = ({ isOpen, onClose
         }
       }
 
-      const response = await fetch(`${BACKEND_URL}api/prompts/search?${params.toString()}`);
+      const response = await apiFetch(`api/prompts/search?${params.toString()}`);
       const data = await response.json();
 
       if (data.success) {
@@ -115,7 +115,7 @@ const SearchPromptsModal: React.FC<SearchPromptsModalProps> = ({ isOpen, onClose
 
   const handleSelectPrompt = async (prompt: SavedPrompt) => {
     try {
-      const response = await fetch(`${BACKEND_URL}api/prompts/${prompt.id}`);
+      const response = await apiFetch(`api/prompts/${prompt.id}`);
       const data = await response.json();
       
       if (data.success) {
