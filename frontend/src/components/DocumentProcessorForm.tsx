@@ -156,14 +156,25 @@ const DocumentProcessorForm: React.FC = () => {
   const rawRowId = searchParams.get('rowID')
 
 
+  
+  const hasAnyInitParams = !!(folderName || xlsxFilename || siteName || pdfFilename || rawRowId || rawRow || rawColumn || rawTemperature);
 
-  // ---- validate required presence first ----
-    if (!folderName || !xlsxFilename || !siteName || !rawRowId) {
-    if (folderName || xlsxFilename || pdfFilename || siteName) {
-      setInitError('Some needed parameters were not provided.');
-    }
-    return;
-  }
+const requiredParams: Array<{ key: string; present: boolean }> = [
+  { key: 'folderName',   present: !!folderName },
+  { key: 'xlsxFilename', present: !!xlsxFilename },
+  { key: 'siteName',     present: !!siteName },
+  { key: 'pdfFilename',  present: !!pdfFilename },
+  { key: 'rowID',        present: !!rawRowId },
+];
+
+const missing = requiredParams.filter(p => !p.present).map(p => p.key);
+
+if (hasAnyInitParams && missing.length > 0) {
+  setInitError(
+    `Missing required URL parameter${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`
+  );
+  return;
+}
 
   // ---- sanitise fields ----
   const errors: string[] = [];
