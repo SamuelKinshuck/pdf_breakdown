@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime
 import json
+import threading
+import pandas as pd
 
 logging.basicConfig(
     level=logging.INFO,
@@ -664,5 +666,186 @@ def delete_job(job_id: str) -> Dict[str, Any]:
     return {"success": False, "error": "Database is busy, please try again"}
 
 
+# ----------------------------
+# FEEDBACK (standalone section)
+# ----------------------------
+def init_feedback_table():
+    """
+    Initialize the feedback table.
+
+    If an older schema exists, migrate it to the new schema:
+      - name (TEXT)
+      - rating_usefulness (INTEGER 1-5)
+      - comment (TEXT)
+      - meta_json (TEXT)
+    """
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+
+        # Does the table exist?
+        row = cur.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='feedback'"
+        ).fetchone()
+        exists = row is not None
+
+        if not exists:
+            cur.execute("""
+                CREATE TABLE feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                    name TEXT NOT NULL,
+                    rating_usefulness INTEGER NOT NULL,
+
+                    comment TEXT,
+                    meta_json TEXT
+                )
+            """)
+        else:
+            # Check columns; if not matching, migrate
+            cols = cur.execute("PRAGMA table_info(feedback)").fetchall()
+            colnames = [c[1] for c in cols]  # (cid, name, type, notnull, dflt, pk)
+            expected = {"id", "created_at", "name", "rating_usefulness", "comment", "meta_json"}
+
+            if set(colnames) != expected:
+                logger.warning(f"Feedback table schema mismatch, migrating. Found columns: {colnames}")
+
+                # Rename old table
+                cur.execute("DROP TABLE IF EXISTS feedback")
+
+                # Create new table
+                cur.execute("""
+                    CREATE TABLE feedback (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                        name TEXT NOT NULL,
+                        rating_usefulness INTEGER NOT NULL,
+
+                        comment TEXT,
+                        meta_json TEXT
+                    )
+                """)
+
+                cur.execute("""
+                    INSERT INTO feedback (created_at, name, rating_usefulness, comment, meta_json)
+                    SELECT
+                        created_at,
+                        '' as name,
+                        0 as rating_usefulness,
+                        comment,
+                        meta_json
+                    FROM feedback_old
+                """)
+
+                # Drop old table (optional; remove this line if you want to keep it around)
+                cur.execute("DROP TABLE feedback_old")
+
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_feedback_created_at
+            ON feedback(created_at DESC)
+        """)
+        logger.info("Feedback table initialized successfully")
+
+
+_FEEDBACK_BACKUP_LOCK = threading.Lock()
+
+def _write_feedback_backup_xlsx():
+
+    backup_dir = Path(DB_DIR)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ").replace(':', '-')
+    backup_path = ("../feedback_backup_" + ts + ".xlsx").resolve()
+
+    # Read all feedback rows
+    with get_db_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM feedback ORDER BY created_at DESC"
+        ).fetchall()
+
+    df = pd.DataFrame([dict(r) for r in rows])
+
+    # Atomic-ish write: write temp then replace
+    df.to_excel(str(backup_path), index=False)
+
+
+def save_feedback(
+    name: str,
+    rating_usefulness: int,
+    comment: str = "",
+    meta: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Save a feedback entry.
+
+    Also rewrites an XLSX backup (best-effort)
+    """
+    def _valid_rating(x: int) -> bool:
+        try:
+            xi = int(x)
+            return 1 <= xi <= 5
+        except Exception:
+            return False
+
+    name = (name or "").strip()
+    if len(name) == 0:
+        return {"success": False, "error": "name is required"}
+    if len(name) > 200:
+        return {"success": False, "error": "name is too long (max 200 characters)"}
+
+    if not _valid_rating(rating_usefulness):
+        return {"success": False, "error": "rating_usefulness must be an integer 1–5"}
+
+    comment = (comment or "").strip()
+    if len(comment) > 20000:
+        return {"success": False, "error": "comment is too long (max 20,000 characters)"}
+
+    attempt = 0
+    while attempt < MAX_RETRIES:
+        try:
+            # 1) Save to SQLite (commit occurs when context exits)
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO feedback (
+                        name, rating_usefulness,
+                        comment, meta_json
+                    ) VALUES (?, ?, ?, ?)
+                """, (
+                    name,
+                    int(rating_usefulness),
+                    comment,
+                    json.dumps(meta or {}),
+                ))
+                fid = cursor.lastrowid
+
+            logger.info(f"Saved feedback id={fid}")
+
+            # 2) Best-effort XLSX backup (do NOT fail the request if this breaks)
+            try:
+                with _FEEDBACK_BACKUP_LOCK:
+                    _write_feedback_backup_xlsx()
+            except Exception as backup_err:
+                logger.warning(f"Feedback saved but XLSX backup failed: {backup_err}")
+
+            return {"success": True, "message": "Feedback submitted", "id": fid}
+
+        except sqlite3.OperationalError as e:
+            if any(err in str(e).lower() for err in RETRYABLE_ERRORS):
+                attempt += 1
+                logger.warning(f"Database locked, retry {attempt}/{MAX_RETRIES}: {e}")
+                time.sleep(RETRY_DELAY * attempt)
+            else:
+                logger.error(f"Non-retryable database error: {e}")
+                return {"success": False, "error": str(e)}
+        except Exception as e:
+            logger.error(f"Error saving feedback: {e}")
+            return {"success": False, "error": str(e)}
+
+    return {"success": False, "error": "Database is busy, please try again"}
+
+
 init_prompts_table()
 init_jobs_table()
+init_feedback_table()

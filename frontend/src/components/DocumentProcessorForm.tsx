@@ -10,6 +10,9 @@ import { apiFetch, apiUrl } from '../apiConfig';
 import AI from '../assets/ai.png'
 import PromptSummaryCompact from './PromptSummaryCompact';
 import ExcelLimitWarningModal from './ExcelLimitWarningModal';
+import truncateDeep from '../utils/TruncateDeep';
+import TestingStateOverlay from './TestingStateOverlay';
+import FeedbackWidget from './FeedbackWidget';
 
 
   // ---- helpers ----
@@ -130,6 +133,21 @@ const DocumentProcessorForm: React.FC = () => {
   const [currentFilePagesDone, setCurrentFilePagesDone] = useState<number>(0);
 
   const batchTotalPages = batchFiles?.reduce((s, f) => s + (f.page_count || 0), 0) ?? 0;
+
+  const [testingModeOn, setTestingModeOn] = useState(false);
+  const [showTestingModal, setShowTestingModal] = useState(false);
+
+  
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("testingMode");
+    if (!raw) return;
+
+    if (raw.trim().toLowerCase() === "on") {
+      setTestingModeOn(true);
+    }
+  }, []);
 
   
 
@@ -877,6 +895,49 @@ const handleSubmit = async (e: React.FormEvent) => {
 
   const enableButton = !((batchFiles ? batchFiles.length === 0 : (!fileInfo || formData.selectedPages.length === 0)) || isProcessing)
 
+  const debugDump = truncateDeep({
+    // Use the exact state variable names as labels:
+    formData,
+    fileInfo,
+    isUploading,
+    isProcessing,
+    uploadError,
+
+    isInitializing,
+    initError,
+    initializedFromUrl,
+
+    processedPages,
+    processingError,
+    totalPages,
+    wasFallback,
+
+    batchFiles,
+    totalFiles,
+    currentFileIndex,
+    currentFileName,
+    currentFilePagesTotal,
+    currentFilePagesDone,
+
+    showSuccessModal,
+    showOutputModal,
+    outputConfig,
+    showDetailsModal,
+
+    showSavePromptModal,
+    showSearchPromptsModal,
+    promptSaveSuccess,
+
+    promptConfigExpanded,
+    modelConfigExpanded,
+    promptSectionsExpanded,
+
+    showExcelLimitModal,
+    excelLimitFields,
+
+    // include derived values if you want:
+    batchTotalPages,
+  });
   if(initError) {
     return(<p
             style={{
@@ -955,6 +1016,14 @@ if (isInitializing) {
 
 
   return (
+    <>
+      <FeedbackWidget />
+      <TestingStateOverlay
+        testingModeOn={testingModeOn}
+        showTestingModal={showTestingModal}
+        setShowTestingModal={setShowTestingModal}
+        debugDump={debugDump}
+      />
     <form onSubmit={handleSubmit} style={{ 
       fontFamily: 'system-ui, -apple-system, sans-serif',
       padding: '40px',
@@ -1724,6 +1793,7 @@ if (isInitializing) {
         fields={excelLimitFields}
       />
     </form>
+    </>
   );
 };
 

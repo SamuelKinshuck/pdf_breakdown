@@ -60,6 +60,7 @@ from backend.database import (
     search_prompts,
     get_prompt_by_id,
     delete_prompt,
+    save_feedback,
 
     # page results
     create_page_results_table,
@@ -1558,6 +1559,37 @@ def finalize_batch():
         tb = traceback.format_exc()
         print("!" * 80)
         print("Unhandled error in finalize_batch")
+        print(tb)
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@app.route("/api/feedback", methods=["POST"])
+def api_submit_feedback():
+    try:
+        data = request.get_json(force=True) or {}
+
+        name = (data.get("name") or "").strip()
+        rating_usefulness = data.get("rating_usefulness")
+        comment = (data.get("comment") or "").strip()
+        meta = data.get("meta") or {}
+
+        resp = save_feedback(
+            name=name,
+            rating_usefulness=rating_usefulness,
+            comment=comment,
+            meta=meta,
+        )
+
+        if resp.get("success"):
+            return jsonify(resp), 201
+
+        # Validation / expected failure
+        return jsonify(resp), 400
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        print("!" * 80)
+        print("Error in /api/feedback")
         print(tb)
         return jsonify({"success": False, "error": str(e)}), 500
 
