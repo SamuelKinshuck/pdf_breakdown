@@ -348,11 +348,11 @@ if (hasAnyInitParams && missing.length > 0) {
 
   const downloadCsv = async (absoluteUrl: string, filename?: string | null) => {
     const dlResp = await fetch(absoluteUrl);
-    if (!dlResp.ok) throw new Error('CSV download failed.');
+    if (!dlResp.ok) throw new Error('XLSX download failed.');
     const blob = await dlResp.blob();
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = filename || 'gpt_responses.csv';
+    link.download = filename || 'gpt_responses.xlsx';
     document.body.appendChild(link);
     link.click();
     URL.revokeObjectURL(link.href);
