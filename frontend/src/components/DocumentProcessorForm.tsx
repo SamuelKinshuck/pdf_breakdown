@@ -954,6 +954,8 @@ const handleSubmit = async (e: React.FormEvent) => {
 
 if (isInitializing) {
     return (
+      <>
+      <FeedbackWidget />
       <div
         style={{
           fontFamily: 'system-ui, -apple-system, sans-serif',
@@ -1011,6 +1013,7 @@ if (isInitializing) {
         </div>
 
       </div>
+    </>
     );
   }
 

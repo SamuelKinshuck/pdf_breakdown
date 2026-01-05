@@ -206,9 +206,7 @@ const FeedbackWidget: React.FC = () => {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
               <div>
                 <div style={{ fontSize: 20, fontWeight: 900 }}>Tell us what you think</div>
-                <div style={{ marginTop: 4, opacity: 0.75 }}>
-                  Three fields only: name, usefulness rating, and comments.
-                </div>
+               
               </div>
 
               <button
@@ -252,7 +250,7 @@ const FeedbackWidget: React.FC = () => {
 
               {/* Rating */}
               <RatingRow
-                label="How useful was the process? (1–5)"
+                label="How useful are you finding the RIDA the process overall? (1–5)"
                 value={ratingUsefulness}
                 onChange={(v) => setRatingUsefulness(v)}
               />
