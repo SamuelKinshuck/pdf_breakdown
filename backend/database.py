@@ -666,6 +666,30 @@ def delete_job(job_id: str) -> Dict[str, Any]:
     return {"success": False, "error": "Database is busy, please try again"}
 
 
+from typing import Tuple
+
+def cleanup_jobs_older_than(max_age_minutes: int = 30) -> int:
+    """
+    Delete job rows older than max_age_minutes based on created_at.
+    Returns number of jobs deleted.
+    """
+    cutoff_expr = f"-{int(max_age_minutes)} minutes"
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            DELETE FROM jobs
+            WHERE created_at < datetime('now', ?)
+            """,
+            (cutoff_expr,)
+        )
+        deleted = cursor.rowcount or 0
+
+    logger.info(f"cleanup_jobs_older_than({max_age_minutes}) deleted {deleted} jobs")
+    return deleted
+
+
 # ----------------------------
 # FEEDBACK (standalone section)
 # ----------------------------
@@ -849,3 +873,4 @@ def save_feedback(
 init_prompts_table()
 init_jobs_table()
 init_feedback_table()
+cleanup_jobs_older_than(30)
