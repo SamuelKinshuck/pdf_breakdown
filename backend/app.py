@@ -1430,7 +1430,7 @@ def finalize_batch():
                 "timestamp": processing_ts,
                 "chunk": chunk_id,
                 "Filename stem": file_stem,
-                "Data reference": None,
+                "Data reference": original_file_name,
                 "Brief description (optional)": f"Page {page}",
                 "Source (optional)": original_file_name,
                 "Data": text
