@@ -381,8 +381,7 @@ def _compose_user_prompt(role: str, task: str, context: str, fmt: str,
 app = Flask(__name__, static_folder= str(PROJECT_ROOT) + '/frontend/build', static_url_path='')
 CORS(app)  # allow all origins; tighten in prod
 
-# Configuration
-UPLOAD_FOLDER = 'uploads'
+
 # Configuration
 ALLOWED_EXTENSIONS = {'pdf'}
 app.config['UPLOAD_FOLDER'] = str(UPLOAD_ROOT)
@@ -390,8 +389,6 @@ app.config['UPLOAD_FOLDER'] = str(UPLOAD_ROOT)
 # Ensure root exists
 UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
-# Create upload directory if it doesn't exist
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 
 def allowed_file(filename):
@@ -1206,7 +1203,7 @@ def process_page():
                     df_clean_list.append({
                         "timestamp": processing_ts,
                         "chunk": chunk_id,
-                        "Data reference": None,
+                        "Data reference": original_file_name,
                         "Brief description (optional)": f'Page {r["page"]}',
                         "Source (optional)": original_file_name,
                         "Data": text
