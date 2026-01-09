@@ -1,4 +1,5 @@
 *.pptx
+*.xlsx
 .idea
 backend/data
 backend/uploads

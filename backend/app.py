@@ -1203,7 +1203,7 @@ def process_page():
                     df_clean_list.append({
                         "timestamp": processing_ts,
                         "chunk": chunk_id,
-                        "Data reference": original_file_name,
+                        "Data reference": f"p_{original_file_name}",
                         "Brief description (optional)": f'Page {r["page"]}',
                         "Source (optional)": original_file_name,
                         "Data": text
@@ -1430,7 +1430,7 @@ def finalize_batch():
                 "timestamp": processing_ts,
                 "chunk": chunk_id,
                 "Filename stem": file_stem,
-                "Data reference": original_file_name,
+                "Data reference": f"p_{original_file_name}",
                 "Brief description (optional)": f"Page {page}",
                 "Source (optional)": original_file_name,
                 "Data": text
