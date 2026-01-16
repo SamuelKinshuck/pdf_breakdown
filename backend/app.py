@@ -1694,11 +1694,26 @@ def root():
     return app.send_static_file("index.html")
 
 
+from pathlib import Path
+
+def _is_development(js_file_path: str) -> bool:
+    """
+    Reads a .js file as raw text and checks whether it contains
+    the substring 'DEVELOPMENT = true'.
+    """
+    content = Path(js_file_path).read_text(encoding="utf-8")
+    return "DEVELOPMENT = true" in content
+
+DEVELOPMENT = _is_development('../frontend/build/config.js')
+
 try:
     if str(BASE_DIR).find('stgadfileshare001') != -1:
         print('Running in stgadfileshare001 environment')
         HOST = '0.0.0.0'
-        PORT = 8316
+        if DEVELOPMENT:
+            PORT = 8326
+        else:
+            PORT = 8316
     else:
         print('Running in local environment')
         HOST = 'localhost'
