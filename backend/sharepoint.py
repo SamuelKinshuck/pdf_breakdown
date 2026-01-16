@@ -6,6 +6,7 @@ from office365.sharepoint.client_context import ClientContext
 from office365.runtime.client_request_exception import ClientRequestException
 import pandas as pd
 from io import StringIO, BytesIO
+import traceback
 
 
 # Used to create the context for connecting to sharepoint
@@ -214,13 +215,13 @@ def sharepoint_import_excel(ctx, sp_file_url, sheet=None, version_label="Current
             df = pd.read_excel(file_stream, sheet_name=sheet)
         except Exception as e:
             print("Error creating dataframe...." + str(e))
-            df = None
+            raise
     else:
         try:
             df = custom_function(file_stream)
         except Exception as e:
             print("Error creating dataframe...." + str(e))
-            df = None
+            raise
 
     file_stream.close()
 
