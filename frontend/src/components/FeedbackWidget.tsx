@@ -6,7 +6,6 @@ const FeedbackWidget: React.FC = () => {
 
   // Form state (DO NOT clear on failure)
   const [name, setName] = useState("");
-  const [ratingUsefulness, setRatingUsefulness] = useState<number>(0); // 1-5
   const [comment, setComment] = useState("");
 
   // UX state
@@ -24,15 +23,12 @@ const FeedbackWidget: React.FC = () => {
   const canSubmit = useMemo(() => {
     return (
       name.trim().length > 0 &&
-      ratingUsefulness >= 1 &&
-      ratingUsefulness <= 5 &&
       !isSubmitting
     );
-  }, [name, ratingUsefulness, isSubmitting]);
+  }, [name, isSubmitting]);
 
   const resetForm = () => {
     setName("");
-    setRatingUsefulness(0);
     setComment("");
     setError(null);
   };
@@ -45,10 +41,7 @@ const FeedbackWidget: React.FC = () => {
       setError("Please enter your name.");
       return;
     }
-    if (ratingUsefulness < 1 || ratingUsefulness > 5) {
-      setError("Please select a usefulness rating (1–5).");
-      return;
-    }
+    
 
     setIsSubmitting(true);
 
@@ -58,7 +51,6 @@ const FeedbackWidget: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          rating_usefulness: ratingUsefulness,
           comment,
           meta: {
             path: window.location.pathname,
@@ -97,41 +89,6 @@ const FeedbackWidget: React.FC = () => {
     }
   };
 
-  const RatingRow: React.FC<{
-    label: string;
-    value: number;
-    onChange: (v: number) => void;
-  }> = ({ label, value, onChange }) => {
-    return (
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ fontWeight: 700, marginBottom: 8 }}>{label}</div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {[1, 2, 3, 4, 5].map((n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => onChange(n)}
-              style={{
-                padding: "10px 12px",
-                borderRadius: 10,
-                border: "1px solid rgba(0,0,0,0.15)",
-                cursor: "pointer",
-                fontWeight: 700,
-                background: value === n ? "rgba(62, 137, 137, 0.18)" : "white",
-                boxShadow: value === n ? "0 6px 16px rgba(0,0,0,0.08)" : "none",
-                minWidth: 44,
-              }}
-              aria-label={`${label}: ${n} out of 5`}
-              disabled={isSubmitting}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
   return (
     <>
       {/* Sticky button (top-left) */}
@@ -153,7 +110,7 @@ const FeedbackWidget: React.FC = () => {
           boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
         }}
       >
-        💬 Feedback
+        💬 Suggestions
       </button>
 
       {/* Toast */}
@@ -248,13 +205,9 @@ const FeedbackWidget: React.FC = () => {
                 />
               </div>
 
-              {/* Rating */}
-              <RatingRow
-                label="How useful are you finding the RIDA the process overall? (1–5)"
-                value={ratingUsefulness}
-                onChange={(v) => setRatingUsefulness(v)}
-              />
-
+              <div>
+                <p> This is a new process and any suggestions you may have to improve how it works are welcome. Please use the text box below</p>
+              </div>
               {/* Comments */}
               <div style={{ marginTop: 8 }}>
                 <div style={{ fontWeight: 700, marginBottom: 8 }}>Comments</div>

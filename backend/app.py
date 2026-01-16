@@ -1563,13 +1563,11 @@ def api_submit_feedback():
         data = request.get_json(force=True) or {}
 
         name = (data.get("name") or "").strip()
-        rating_usefulness = data.get("rating_usefulness")
         comment = (data.get("comment") or "").strip()
         meta = data.get("meta") or {}
 
         resp = save_feedback(
             name=name,
-            rating_usefulness=rating_usefulness,
             comment=comment,
             meta=meta,
         )

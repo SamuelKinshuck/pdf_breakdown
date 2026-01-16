@@ -699,7 +699,6 @@ def init_feedback_table():
 
     If an older schema exists, migrate it to the new schema:
       - name (TEXT)
-      - rating_usefulness (INTEGER 1-5)
       - comment (TEXT)
       - meta_json (TEXT)
     """
@@ -719,7 +718,6 @@ def init_feedback_table():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
                     name TEXT NOT NULL,
-                    rating_usefulness INTEGER NOT NULL,
 
                     comment TEXT,
                     meta_json TEXT
@@ -729,7 +727,7 @@ def init_feedback_table():
             # Check columns; if not matching, migrate
             cols = cur.execute("PRAGMA table_info(feedback)").fetchall()
             colnames = [c[1] for c in cols]  # (cid, name, type, notnull, dflt, pk)
-            expected = {"id", "created_at", "name", "rating_usefulness", "comment", "meta_json"}
+            expected = {"id", "created_at", "name", "comment", "meta_json"}
 
             if set(colnames) != expected:
                 logger.warning(f"Feedback table schema mismatch, migrating. Found columns: {colnames}")
@@ -744,7 +742,6 @@ def init_feedback_table():
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
                         name TEXT NOT NULL,
-                        rating_usefulness INTEGER NOT NULL,
 
                         comment TEXT,
                         meta_json TEXT
@@ -752,11 +749,10 @@ def init_feedback_table():
                 """)
 
                 cur.execute("""
-                    INSERT INTO feedback (created_at, name, rating_usefulness, comment, meta_json)
+                    INSERT INTO feedback (created_at, name, comment, meta_json)
                     SELECT
                         created_at,
                         '' as name,
-                        0 as rating_usefulness,
                         comment,
                         meta_json
                     FROM feedback_old
@@ -796,7 +792,6 @@ def _write_feedback_backup_xlsx():
 
 def save_feedback(
     name: str,
-    rating_usefulness: int,
     comment: str = "",
     meta: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -805,21 +800,12 @@ def save_feedback(
 
     Also rewrites an XLSX backup (best-effort)
     """
-    def _valid_rating(x: int) -> bool:
-        try:
-            xi = int(x)
-            return 1 <= xi <= 5
-        except Exception:
-            return False
 
     name = (name or "").strip()
     if len(name) == 0:
         return {"success": False, "error": "name is required"}
     if len(name) > 200:
         return {"success": False, "error": "name is too long (max 200 characters)"}
-
-    if not _valid_rating(rating_usefulness):
-        return {"success": False, "error": "rating_usefulness must be an integer 1–5"}
 
     comment = (comment or "").strip()
     if len(comment) > 20000:
@@ -833,12 +819,11 @@ def save_feedback(
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO feedback (
-                        name, rating_usefulness,
+                        name,
                         comment, meta_json
-                    ) VALUES (?, ?, ?, ?)
+                    ) VALUES (?, ?, ?)
                 """, (
                     name,
-                    int(rating_usefulness),
                     comment,
                     json.dumps(meta or {}),
                 ))
