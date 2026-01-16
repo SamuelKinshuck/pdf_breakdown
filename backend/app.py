@@ -608,8 +608,8 @@ def init_from_sharepoint():
             slice_vals.append("")
 
         role_val        = slice_vals[0]
-        task_val        = slice_vals[1]
-        context_val     = slice_vals[2]
+        context_val     = slice_vals[1]
+        task_val        = slice_vals[2]
         format_val      = slice_vals[3]
         constraints_val = slice_vals[4]
         excel_limit_hits = {}
