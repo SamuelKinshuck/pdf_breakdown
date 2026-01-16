@@ -1,32 +1,21 @@
-from openai import AzureOpenAI, BadRequestError, APITimeoutError
+from openai import OpenAI, BadRequestError, APITimeoutError
 import os
 from mimetypes import guess_type
 import base64
 from typing import List
 import httpx
-from PIL import Image
 import io
 
-endpoint = "https://oaigad.openai.azure.com/"
-model_name = "gpt-4.1"
-deployment = "gpt-4.1"
 subscription_key = os.getenv("OPENAI_API_KEY")
 
-api_version = "2024-12-01-preview"
+endpoint = "https://oaigad.openai.azure.com/openai/v1"
 
-client = None
-if subscription_key:
-    try:
-        client = AzureOpenAI(
-            api_key=os.getenv("OPENAI_API_KEY"),
-            azure_endpoint="https://oaigad.openai.azure.com/",
-            api_version="2024-12-01-preview",
-            max_retries=0,
-            timeout=httpx.Timeout(300.0, read=300.0, write=300.0, pool=300.0)
-        )
-    except Exception as e:
-        print(f"Warning: Failed to initialize Azure OpenAI client: {e}")
-
+client = OpenAI(
+    base_url=endpoint,
+    api_key=subscription_key,
+    max_retries=0,
+    timeout=httpx.Timeout(90.0, read=60.0, write=60.0, pool=60.0)
+)
 
 def _reduce_image_size_by_half(data_url: str) -> str:
     """
@@ -88,7 +77,7 @@ def get_response_from_chatgpt_simple(system_prompt: str, user_prompt: str, model
     if client is None:
         return "API key not available"
     
-    if model == 'gpt-5':
+    if model in ('gpt-5', 'gpt-5.1-chat'):
         temperature = 1
     else:
         temperature = 0
@@ -108,7 +97,7 @@ def get_response_from_chatgpt_with_functions(user_prompt: str, system_prompt: st
     if client is None:
         return "API key not available"
     
-    if model == 'gpt-5':
+    if model in ('gpt-5', 'gpt-5.1-chat'):
         used_temperature = 1
     else:
         used_temperature = temperature
@@ -146,7 +135,7 @@ def get_response_from_chatgpt_image(system_prompt: str, user_prompt: str, image_
         image_data_url = local_image_to_data_url(image_path)
     
     max_retries = 1
-    if model == 'gpt-5':
+    if model in ('gpt-5', 'gpt-5.1-chat'):
         temperature = 1
     else:
         temperature = 0
@@ -187,7 +176,7 @@ def get_response_from_chatgpt_image_and_functions(system_prompt: str, user_promp
         image_data_url = local_image_to_data_url(image_path)
     
     max_retries = 1
-    if model == 'gpt-5':
+    if model in ('gpt-5', 'gpt-5.1-chat'):
         temperature = 1
     else:
         temperature = 0
@@ -236,7 +225,7 @@ def get_response_from_chatgpt_multiple_image_and_functions(
         image_data_urls = [local_image_to_data_url(path) for path in image_paths]
 
     max_retries = 1
-    if model == 'gpt-5':
+    if model in ('gpt-5', 'gpt-5.1-chat'):
         temperature = 1
     else:
         temperature = 0

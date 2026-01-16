@@ -45,6 +45,15 @@ import FeedbackWidget from './FeedbackWidget';
     return n >= 0 && n <= 1 ? n : 'error';
   };
 
+  function mapModelName(rawName: string): string | undefined {
+    return {
+      'gpt-5.1-thinking' : 'gpt-5.1',
+      'gpt-5.1-non-thinking' : 'gpt-5.1-chat',
+      'gpt-5' : 'gpt-5',
+      'gpt-4.1' : 'gpt-4.1',
+    }[rawName]
+  }
+
   const sanitiseIntegerish = (
     raw: string | null,
     fieldName: 'row' | 'column'
@@ -233,7 +242,9 @@ if (hasAnyInitParams && missing.length > 0) {
     errors.push(`Invalid column "${rawColumn ?? ''}". Must be a number (will be rounded to an integer).`);
   }
 
-  const validModels = ['gpt-4.1', 'gpt-5'];
+  //valid as user inputs, not as what we send to backend
+  const validModels = ['gpt-4.1', 'gpt-5', 'gpt-5.1-thinking', 'gpt-5.1-non-thinking'];
+
 
   if (typeof model !== 'string' || !validModels.includes(model.trim().toLowerCase())) {
     errors.push(`Invalid model "${model ?? ''}". Must be one of: ${validModels.join(', ')}.`);
@@ -685,7 +696,7 @@ const handleSubmit = async (e: React.FormEvent) => {
               format: formData.format,
               constraints: formData.constraints,
               temperature: formData.temperature,
-              model: formData.model,
+              model: mapModelName(formData.model),
               file_id: f.file_id,
               selected_pages: pages,
               output_config: outCfg,
@@ -784,7 +795,7 @@ const handleSubmit = async (e: React.FormEvent) => {
           format: formData.format,
           constraints: formData.constraints,
           temperature: formData.temperature,
-          model: formData.model,
+          model: mapModelName(formData.model),
           file_id: fileInfo!.file_id,
           selected_pages: formData.selectedPages,
           output_config: outputConfig,
