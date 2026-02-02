@@ -446,6 +446,53 @@ def download(filename):
         as_attachment=True
     )
 
+@app.route("/api/prepare_sharepoint_pdf", methods=["POST"])
+def prepare_sharepoint_pdf():
+    """
+    Download ONE SharePoint PDF into UPLOAD_ROOT and return {file_id, page_count, file_stem, filename}.
+    This lets folder-mode avoid downloading everything up-front.
+    """
+    try:
+        data = request.get_json(force=True)
+
+        folderName = data.get("folderName")
+        siteName   = data.get("siteName", "GADOpportunitiesandSolutions")
+        tenant     = data.get("tenant", "tris42.onmicrosoft.com")
+        client_id  = data.get("client_id", "d44a05d5-c6a5-4bbb-82d2-443123722380")
+
+        # Either provide full server-relative path OR folder+filename
+        sp_file_path = data.get("sp_file_path")
+        filename     = data.get("filename")
+
+        if not sp_file_path:
+            if not (folderName and filename):
+                return jsonify({"success": False, "error": "Provide either sp_file_path OR (folderName + filename)"}), 400
+            sp_file_path = f"{folderName.rstrip('/')}/{filename}".replace("//", "/")
+
+        if not filename:
+            filename = Path(sp_file_path).name
+
+        sp_site_url = f"https://tris42.sharepoint.com/sites/{siteName}/"
+        ctx = sharepoint_create_context(sp_site_url, tenant, client_id)
+
+        info = _download_sp_file_to_upload(ctx, sp_file_path, filename)
+
+        return jsonify({
+            "success": True,
+            "filename": normalize(info["filename"]),
+            "page_count": int(info["page_count"]),
+            "file_id": normalize(info["file_id"]),
+            "file_stem": normalize(info["file_stem"]),
+            "sp_file_path": sp_file_path,
+        }), 200
+
+    except Exception as e:
+        tb = traceback.format_exc()
+        print("!" * 80)
+        print("Unhandled error in prepare_sharepoint_pdf")
+        print(tb)
+        return jsonify({"success": False, "error": str(e)}), 500
+
 
 EXCEL_CELL_CHAR_LIMIT = 32767
 
@@ -699,36 +746,26 @@ def init_from_sharepoint():
         # Deterministic order
         pdf_files = sorted(pdf_files, key=lambda x: str(x.get("name", "")).lower())
 
-        downloaded = []
+        # Instead of downloading, return lightweight descriptors only.
+        # (No page_count, no file_id yet.)
+        pdf_files_light = []
         for f in pdf_files:
             name = f["name"]
             sp_file_path = f"{pdf_folder.rstrip('/')}/{name}".replace("//", "/")
-            try:
-                info = _download_sp_file_to_upload(ctx, sp_file_path, name)
-                downloaded.append({
-                    "success": True,
-                    "filename": normalize(info["filename"]),
-                    "page_count": int(info["page_count"]),
-                    "file_id": normalize(info["file_id"]),
-                    "file_stem": normalize(info["file_stem"]),
-                })
-            except Exception as e:
-                tb = traceback.format_exc()
-                print("!" * 80)
-                print(f"Error downloading file {name} from folder {pdf_folder}")
-                print(tb)
-                return jsonify({
-                    "success": False,
-                    "error": f"Failed downloading '{name}': {e}"
-                }), 500
+            pdf_files_light.append({
+                "success": True,
+                "filename": normalize(name),
+                "sp_file_path": normalize(sp_file_path),
+                "length": normalize(f.get("length")),  # SharePoint-reported size (optional)
+                "file_stem": normalize(Path(name).stem),
+                # page_count intentionally omitted (requires downloading)
+                # file_id intentionally omitted (created when prepared)
+            })
 
-        # Return first file as pdf_file for minimal backward compatibility,
-        # but also include the full list as pdf_files.
         return jsonify({
             "success": True,
             "mode": "folder",
-            "pdf_file": downloaded[0],
-            "pdf_files": downloaded,
+            "pdf_files": pdf_files_light,
             "pdf_folder": pdf_folder,
             "prompt": {
                 "role":        normalize(role_val),

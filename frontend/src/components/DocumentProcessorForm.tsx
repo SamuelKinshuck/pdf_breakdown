@@ -67,8 +67,23 @@ import FeedbackWidget from './FeedbackWidget';
     return int;
   };
 
-interface BatchFileInfo extends FileUploadResponse {
+  const estimatePagesFromBytes = (bytes: number | null | undefined) => {
+    const avgBytesPerPage = 30_000; // 
+    const minPages = 1;
+    if (!bytes || bytes <= 0) return minPages;
+    return Math.max(minPages, Math.round(bytes / avgBytesPerPage));
+  };
+
+interface BatchFileInfo {
+  success: boolean;
+  filename: string;
   file_stem: string;
+  sp_file_path: string;
+  length?: number | null;
+
+  // These get filled in after "prepare" (download one file)
+  page_count?: number;
+  file_id?: string;
 }
 
 interface InitFromSharepointResponse {
@@ -131,7 +146,6 @@ const DocumentProcessorForm: React.FC = () => {
   // Processing state
   const [processedPages, setProcessedPages] = useState<{ page: number; gpt_response: string; image_size_bytes?: number }[]>([]);
   const [processingError, setProcessingError] = useState<string | null>(null);
-  const [totalPages, setTotalPages] = useState<number>(0);
   const [wasFallback, setWasFallback] = useState<boolean>(false)
 
   const [batchFiles, setBatchFiles] = useState<BatchFileInfo[] | null>(null);
@@ -141,11 +155,15 @@ const DocumentProcessorForm: React.FC = () => {
   const [currentFilePagesTotal, setCurrentFilePagesTotal] = useState<number>(0);
   const [currentFilePagesDone, setCurrentFilePagesDone] = useState<number>(0);
 
-  const batchTotalPages = batchFiles?.reduce((s, f) => s + (f.page_count || 0), 0) ?? 0;
-
   const [testingModeOn, setTestingModeOn] = useState(false);
   const [showTestingModal, setShowTestingModal] = useState(false);
 
+  const [sharepointInit, setSharepointInit] = useState<{
+    siteName: string | null;
+    folderName: string | null;
+  }>(() => ({ siteName: null, folderName: null }));
+  const [estimatedPagesByFile, setEstimatedPagesByFile] = useState<Record<string, number>>({});
+  const totalPages = Object.values(estimatedPagesByFile).reduce((a, b) => a + b, 0);
   
 
   useEffect(() => {
@@ -164,6 +182,30 @@ const DocumentProcessorForm: React.FC = () => {
     if (!totalPages) return 0;
     return Math.round((processedPages.length / totalPages) * 100);
   };
+
+  useEffect(() => {
+  if (!batchFiles || batchFiles.length === 0) {
+    setTotalFiles(0);
+    setEstimatedPagesByFile({});
+    return;
+  }
+
+  setTotalFiles(batchFiles.length);
+
+  // Only initialise estimates for files we don't already have in the map.
+  // This prevents overwriting real page counts once we learn them.
+  setEstimatedPagesByFile(prev => {
+    const next = { ...prev };
+
+    for (const f of batchFiles) {
+      if (next[f.sp_file_path] == null) {
+        next[f.sp_file_path] = estimatePagesFromBytes(f.length);
+      }
+    }
+
+    return next;
+  });
+}, [batchFiles]);
 
   useEffect(() => {
   const searchParams = new URLSearchParams(window.location.search);
@@ -299,7 +341,13 @@ if (hasAnyInitParams && missing.length > 0) {
       // ---- Folder mode ----
       if (pdfFiles && pdfFiles.length > 0) {
         setBatchFiles(pdfFiles);
-        setFileInfo(pdfFiles[0]); // just for display
+        // Use a display-only placeholder for the UI.
+        setFileInfo({
+          success: true,
+          filename: pdfFiles[0].filename,
+          page_count: 0,     // unknown until prepared
+          file_id: ''        // unknown until prepared
+        });
 
         setFormData(prev => ({
           ...prev,
@@ -323,7 +371,8 @@ if (hasAnyInitParams && missing.length > 0) {
             batch_mode: true,
           } as any)
         );
-
+        
+        setSharepointInit({ siteName, folderName });
         setInitializedFromUrl(true);
         return;
       }
@@ -671,20 +720,57 @@ const handleSubmit = async (e: React.FormEvent) => {
       if (isBatch && batchFiles) {
         const outCfg = { ...(outputConfig as any), batch_mode: true };
 
-        setTotalFiles(batchFiles.length);
-        setTotalPages(batchTotalPages);
-
         const batchJobIds: string[] = [];
 
         for (let fi = 0; fi < batchFiles.length; fi++) {
           const f = batchFiles[fi];
 
+          // 1) Prepare (download + pagecount) ONE file right before processing it
+          const prepResp = await apiFetch('api/prepare_sharepoint_pdf', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              siteName: sharepointInit.siteName,
+              folderName: sharepointInit.folderName,
+              sp_file_path: f.sp_file_path,
+              filename: f.filename,
+            }),
+          });
+
+          if (!prepResp.ok) {
+            const msg = await prepResp.text().catch(() => '');
+            throw new Error(msg || `Prepare failed with status ${prepResp.status} for ${f.filename}`);
+          }
+
+          const prepData = await prepResp.json();
+          if (!prepData?.success || !prepData?.file_id || !prepData?.page_count) {
+            throw new Error(prepData?.error || `Prepare succeeded but missing file_id/page_count for ${f.filename}`);
+          }
+
+          const preparedFileId = prepData.file_id as string;
+          const preparedPageCount = prepData.page_count as number;
+
           setCurrentFileIndex(fi);
           setCurrentFileName(f.filename);
-          setCurrentFilePagesTotal(f.page_count);
-          setCurrentFilePagesDone(0);
+          setCurrentFilePagesTotal(preparedPageCount);
+          setEstimatedPagesByFile(prev => {
+            const prevEstimate = prev[f.sp_file_path] ?? estimatePagesFromBytes(f.length);
+            const next = { ...prev, [f.sp_file_path]: preparedPageCount };
 
-          const pages = Array.from({ length: f.page_count }, (_, i) => i + 1);
+            return next;
+          });
+          setCurrentFilePagesDone(0);
+          setBatchFiles(prev =>
+            prev
+              ? prev.map(x =>
+                  x.sp_file_path === f.sp_file_path
+                    ? { ...x, page_count: preparedPageCount, file_id: preparedFileId }
+                    : x
+                )
+              : prev
+          );
+
+          const pages = Array.from({ length: preparedPageCount }, (_, i) => i + 1);
 
           const resp = await apiFetch('process', {
             method: 'POST',
@@ -697,7 +783,7 @@ const handleSubmit = async (e: React.FormEvent) => {
               constraints: formData.constraints,
               temperature: formData.temperature,
               model: mapModelName(formData.model),
-              file_id: f.file_id,
+              file_id: preparedFileId,
               selected_pages: pages,
               output_config: outCfg,
               original_file_name: f.filename,
@@ -775,7 +861,7 @@ const handleSubmit = async (e: React.FormEvent) => {
       }
 
       // -------------------------
-      // Single-file mode (existing)
+      // Single-file mode
       // -------------------------
       setTotalFiles(1);
       setCurrentFileIndex(0);
@@ -783,7 +869,13 @@ const handleSubmit = async (e: React.FormEvent) => {
       setCurrentFilePagesTotal(formData.selectedPages.length);
       setCurrentFilePagesDone(0);
 
-      setTotalPages(formData.selectedPages.length);
+      // For single: derived from fileInfo (or selected pages)
+      const expectedTotalPages =
+        formData.selectedPages.length > 0
+          ? formData.selectedPages.length
+          : (fileInfo?.page_count ?? 0);
+
+      setEstimatedPagesByFile({ __single__: expectedTotalPages });
 
       const response = await apiFetch('process', {
         method: 'POST',
@@ -945,9 +1037,6 @@ const handleSubmit = async (e: React.FormEvent) => {
 
     showExcelLimitModal,
     excelLimitFields,
-
-    // include derived values if you want:
-    batchTotalPages,
   });
   if(initError) {
     return(<p
@@ -1529,7 +1618,7 @@ if (isInitializing) {
       {/* Page Selection - hide in folder mode (batchFiles) */}
       {fileInfo && !batchFiles && (
         <div style={{ marginBottom: '32px' }}>
-          <label style={labelStyle}>📄 Pages (Total: {fileInfo.page_count})</label>
+          <label style={labelStyle}>📄 Pages (Total: {fileInfo.page_count === 0 ? "Unknown (we won't know until all files are processed)" : fileInfo.page_count})</label>
           
           {/* Quick Selection Buttons */}
           <div style={{ marginBottom: '16px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
@@ -1617,7 +1706,7 @@ if (isInitializing) {
         <div style={{ marginBottom: '24px', padding: '16px', borderRadius: '12px', background: colors.primary.white, border: `1px solid ${colors.primary.lightBlue}` }}>
           <strong>SharePoint folder mode</strong>
           <div style={{ marginTop: 6, color: colors.tertiary.blueGrey, fontSize: 14 }}>
-            Files: {batchFiles.length} • Total pages: {batchTotalPages}
+            Files: {batchFiles.length} • Estimated total pages (based on file size; updates as each file is prepared): {totalPages}
           </div>
           <div style={{ marginTop: 6, color: colors.tertiary.lightGrey, fontSize: 12 }}>
             Output will be combined into a single XLSX with an extra “Filename stem” column.
