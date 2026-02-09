@@ -25,7 +25,9 @@ def sharepoint_create_context(sp_site_url,
     Returns:
         ClientContext: The SharePoint client context.
     """
-    return ClientContext(sp_site_url).with_interactive(tenant=tenant, client_id=client_id)
+    return ClientContext(sp_site_url).with_interactive(tenant=tenant, 
+                                                       client_id=client_id
+                                                       )
 
 
 # Gain info about the current user
@@ -273,30 +275,36 @@ def sharepoint_file_exists(ctx, sp_folder_name, sp_file_name):
             raise ValueError(e.response.text)
 
 
-# Export file to sharepoint (can be path to local file or a file-like object)
-def sharepoint_export(ctx, sp_folder_name, sp_file_name, file_to_export):
+def sharepoint_export(ctx, sp_folder_name, sp_file_name, file_to_export, overwrite: bool = True):
     """
-    Export a file to a SharePoint folder. The file to export can be a path to a local file or a file-like object.
+    Export a file to a SharePoint folder. Supports:
+      - local file path (str)
+      - bytes / bytearray
+      - file-like object (e.g. BytesIO)
 
-    Args:
-        ctx (ClientContext): The SharePoint client context.
-        sp_folder_name (str): The name of the SharePoint folder.
-        sp_file_name (str): The name of the file.
-        file_to_export (str/File-like object): The path to the local file or a file-like object to be exported.
-
-    Returns:
-        bool: True if the file is successfully exported, False otherwise.
+    IMPORTANT: overwrite=True will replace an existing file with the same name.
     """
     try:
         folder = ctx.web.get_folder_by_server_relative_url(sp_folder_name)
+
+        # Office365-REST-Python-Client supports overwrite via files.add(name, content, overwrite)
         if isinstance(file_to_export, str):
             with open(file_to_export, "rb") as f:
-                file = folder.files.upload(f, sp_file_name).execute_query()
+                content = f.read()
+        elif isinstance(file_to_export, (bytes, bytearray)):
+            content = bytes(file_to_export)
         else:
-            file_to_export.seek(0)
-            file = folder.files.upload(file_to_export, sp_file_name).execute_query()
+            # file-like (BytesIO, etc.)
+            try:
+                file_to_export.seek(0)
+            except Exception:
+                pass
+            content = file_to_export
+
+        file = folder.files.add(sp_file_name, content, overwrite).execute_query()
         print("File has been uploaded into: {0}".format(file.serverRelativeUrl))
         return True
+
     except Exception as e:
         print(str(e))
         print("File upload failed!")
