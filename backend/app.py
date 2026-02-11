@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 
 import re
+import time
+import shutil
 
 # Add the project root (one level up from this file) to sys.path
 try:
@@ -411,8 +413,6 @@ def normalize(value):
     return value
 
 
-import time
-import shutil
 
 def cleanup_upload_root(max_age_seconds: int = 3600):
     """
@@ -1215,16 +1215,19 @@ def process_page():
                 df_clean_list = []
                 chunk_id = 1
                 chunk_sum = 0
+                prev_file_stem = None 
 
-                for _, r in df_raw.iterrows():
-                    text = r["gpt_response"]
+                for (file_stem, original_file_name, page, text) in flat_rows:
+                    # --- force chunk break on new file ---
+                    if prev_file_stem is not None and file_stem != prev_file_stem:
+                        chunk_id += 1
+                        chunk_sum = 0
+                    prev_file_stem = file_stem
+                    # -----------------------------------------
+
                     text_len = _safe_len(text)
 
-                    # Decide whether to start a new chunk BEFORE placing this row.
-                    # If adding this row would exceed target, choose the closer of:
-                    #   - end chunk now (distance = target - current_sum)
-                    #   - include row (distance = (current_sum + len) - target)
-                    # Always keep at least one row per chunk.
+                    # existing size-based break (still applies within a file)
                     if chunk_sum > 0 and (chunk_sum + text_len) > TARGET_CHARS_PER_CHUNK:
                         dist_if_break = TARGET_CHARS_PER_CHUNK - chunk_sum
                         dist_if_keep  = (chunk_sum + text_len) - TARGET_CHARS_PER_CHUNK
@@ -1237,14 +1240,14 @@ def process_page():
                     df_clean_list.append({
                         "timestamp": processing_ts,
                         "chunk": chunk_id,
+                        "Filename stem": file_stem,
                         "Data reference": f"p_{original_file_name}",
-                        "Brief description (optional)": f'Page {r["page"]}',
+                        "Brief description (optional)": f"Page {page}",
                         "Source (optional)": original_file_name,
                         "Data": text
                     })
 
                 df = pd.DataFrame(df_clean_list)
-
 
                 # ---- Hardening: clean text to avoid control chars / normalization issues ----
                 _CTRL_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]")  # keep \t \n \r
@@ -1263,8 +1266,6 @@ def process_page():
                 df = df.map(_clean_cell)
                 # ---------------------------------------------------------------------------
 
-                # Prefer Excel-friendly UTF-8 with BOM for widest compatibility
-                ENCODING = 'utf-8-sig'
 
                 # Handle output based on output_config
                 out_type = (output_config or {}).get("outputType", "browser")
