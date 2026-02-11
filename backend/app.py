@@ -654,8 +654,8 @@ def init_from_sharepoint():
         role_val        = slice_vals[0]
         context_val     = slice_vals[1]
         task_val        = slice_vals[2]
-        format_val      = slice_vals[3]
-        constraints_val = slice_vals[4]
+        constraints_val = slice_vals[3]
+        format_val      = slice_vals[4]
         excel_limit_hits = {}
         for field_name, cell_value in {
             "role": role_val,

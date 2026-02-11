@@ -42,8 +42,8 @@ const PromptSummaryCompact: React.FC<PromptSummaryCompactProps> = ({ prompt, col
     { key: 'role', label: 'Role', value: prompt.role },
     { key: 'task', label: 'Task', value: prompt.task },
     { key: 'context', label: 'Context', value: prompt.context },
-    { key: 'format', label: 'Format', value: prompt.format },
-    { key: 'constraints', label: 'Constraints', value: prompt.constraints }
+    { key: 'constraints', label: 'Constraints', value: prompt.constraints },
+    { key: 'format', label: 'Format', value: prompt.format }
   ];
 
   const truncate = (value: string, max = 200) => {

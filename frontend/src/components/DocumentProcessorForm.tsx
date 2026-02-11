@@ -1245,6 +1245,34 @@ if (isInitializing) {
                 />
                 <div style={helperTextStyle}>Background information or relevant details</div>
               </CollapsibleSection>
+              {/* Constraints */}
+              <CollapsibleSection
+                title="⚠️ Constraints"
+                isExpanded={promptSectionsExpanded.constraints}
+                onToggle={() => togglePromptSection('constraints')}
+                isSubSection={true}
+              >
+                <textarea
+                  value={formData.constraints}
+                  onChange={(e) => handleInputChange('constraints', e.target.value)}
+                  rows={4}
+                  style={{
+                    ...inputStyle,
+                    resize: 'vertical' as const,
+                    minHeight: '100px'
+                  }}
+                  placeholder="Define any constraints or limitations..."
+                  onFocus={(e) => {
+                    e.target.style.borderColor = colors.tertiary.blue;
+                    e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
+                  }}
+                  onBlur={(e) => {
+                    e.target.style.borderColor = colors.primary.lightBlue;
+                    e.target.style.boxShadow = 'none';
+                  }}
+                />
+                <div style={helperTextStyle}>Rules, limitations, or things to avoid</div>
+              </CollapsibleSection>
 
               {/* Format */}
               <CollapsibleSection
@@ -1275,34 +1303,7 @@ if (isInitializing) {
                 <div style={helperTextStyle}>Structure, style, length, or presentation requirements</div>
               </CollapsibleSection>
 
-              {/* Constraints */}
-              <CollapsibleSection
-                title="⚠️ Constraints"
-                isExpanded={promptSectionsExpanded.constraints}
-                onToggle={() => togglePromptSection('constraints')}
-                isSubSection={true}
-              >
-                <textarea
-                  value={formData.constraints}
-                  onChange={(e) => handleInputChange('constraints', e.target.value)}
-                  rows={4}
-                  style={{
-                    ...inputStyle,
-                    resize: 'vertical' as const,
-                    minHeight: '100px'
-                  }}
-                  placeholder="Define any constraints or limitations..."
-                  onFocus={(e) => {
-                    e.target.style.borderColor = colors.tertiary.blue;
-                    e.target.style.boxShadow = `0 0 0 3px ${colors.tertiary.blue}20`;
-                  }}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = colors.primary.lightBlue;
-                    e.target.style.boxShadow = 'none';
-                  }}
-                />
-                <div style={helperTextStyle}>Rules, limitations, or things to avoid</div>
-              </CollapsibleSection>
+              
 
               {/* Prompt Management Buttons */}
               <div style={{
