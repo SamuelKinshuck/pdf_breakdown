@@ -1,6 +1,6 @@
 var x = window.location.href;
 var hostname = window.location.hostname;
-var DEVELOPMENT = false
+var DEVELOPMENT = true
 
 if(x.includes('localhost')) {
   // Local development environment - backend on port 8000
