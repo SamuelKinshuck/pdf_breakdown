@@ -1217,6 +1217,21 @@ def process_page():
                 chunk_sum = 0
                 prev_file_stem = None 
 
+                file_stem = job.get("file_stem") or Path(job.get("original_file_name") or "").stem or file_id[:8]
+                original_file_name = job.get("original_file_name") or file_stem
+
+                df_raw = pd.DataFrame(all_results)
+
+                # Deterministic order by page
+                if "page" in df_raw.columns:
+                    df_raw["page"] = df_raw["page"].apply(lambda x: int(x) if str(x).strip() else 0)
+                    df_raw = df_raw.sort_values("page")
+
+                flat_rows = [
+                    (file_stem, original_file_name, int(r["page"]), r.get("gpt_response", ""))
+                    for _, r in df_raw.iterrows()
+                ]
+                
                 for (file_stem, original_file_name, page, text) in flat_rows:
                     # --- force chunk break on new file ---
                     if prev_file_stem is not None and file_stem != prev_file_stem:
